@@ -1,0 +1,53 @@
+rules_version = '2';
+
+// Gamy's cloud database rules (phase C). Everything is locked except a student's own folder:
+//   users/{uid}                                      the account (Pro can never be written by the app)
+//   users/{uid}/subjects/{sid}                       a subject: name
+//   users/{uid}/subjects/{sid}/modules/{mid}         a module: name, how many text parts
+//   users/{uid}/subjects/{sid}/modules/{mid}/parts/{n}   lesson text, at most ~900 KB per part
+// Deploy with: firebase deploy --only firestore:rules
+service cloud.firestore {
+  match /databases/{database}/documents {
+    function isOwner(uid) {
+      return request.auth != null && request.auth.uid == uid;
+    }
+    // Only these fields, with the right types and sizes: nobody can sneak in "pro: true" or huge data.
+    function only(fields) {
+      return request.resource.data.keys().hasOnly(fields);
+    }
+
+    match /users/{uid} {
+      allow read, delete: if isOwner(uid);
+      // The app may create the account with a timestamp only. Pro is never set or changed by the app:
+      // it will come from a checked Google Play purchase.
+      allow create: if isOwner(uid) && only(['created']) && request.resource.data.created is timestamp;
+      allow update: if false;
+
+      match /subjects/{sid} {
+        allow read, delete: if isOwner(uid);
+        allow create, update: if isOwner(uid) && only(['name', 'updated'])
+          && request.resource.data.name is string && request.resource.data.name.size() <= 100
+          && request.resource.data.updated is timestamp;
+
+        match /modules/{mid} {
+          allow read, delete: if isOwner(uid);
+          allow create, update: if isOwner(uid) && only(['name', 'parts', 'updated'])
+            && request.resource.data.name is string && request.resource.data.name.size() <= 200
+            && request.resource.data.parts is int && request.resource.data.parts >= 1 && request.resource.data.parts <= 25
+            && request.resource.data.updated is timestamp;
+
+          match /parts/{n} {
+            allow read, delete: if isOwner(uid);
+            allow create, update: if isOwner(uid) && only(['text'])
+              && request.resource.data.text is string && request.resource.data.text.size() <= 900000;
+          }
+        }
+      }
+    }
+
+    // Anything else: no one.
+    match /{document=**} {
+      allow read, write: if false;
+    }
+  }
+}

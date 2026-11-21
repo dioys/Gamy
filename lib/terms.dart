@@ -1,48 +1,59 @@
 // Change termsVersion whenever the text changes in an important way:
 // everyone will be asked to agree again.
-const termsVersion = '2026-11-09.2';
+const termsVersion = '2026-11-22b';
 
 const termsText = '''GAMY TERMS OF USE AND PRIVACY POLICY
-Last updated: November 9, 2026
+Effective date: November 22, 2026
 
-By ticking "I agree" and using Gamy, you agree to these terms. If you don't agree, please don't use Gamy.
+These Terms of Use and Privacy Policy ("Agreement") form a binding agreement between you ("you", "the User") and the developer of Gamy ("we", "us"). By ticking the box below and selecting "Agree and continue", you confirm that you have read, understood and accepted this Agreement. If you do not accept it, you may not use Gamy.
 
-1. WHO CAN USE GAMY
-You must be 18 or older. By agreeing, you confirm that you are.
+1. ELIGIBILITY
+1.1 Gamy is intended only for persons who are eighteen (18) years of age or older.
+1.2 By accepting this Agreement, you represent and warrant that you are at least eighteen (18) years old.
 
-2. WHAT GAMY IS
-Gamy is a study app. It reads modules you upload and uses an AI service to make quizzes, explain answers and chat with you about your lessons.
+2. DESCRIPTION OF THE SERVICE
+2.1 Gamy is a study application that reads learning modules you upload, creates quizzes and practice problems from them, and answers questions about them.
+2.2 Quizzes, problems and module searches are processed on your device. Gamy does not send your modules to any outside artificial intelligence service.
 
-3. YOUR AI ACCOUNT
-Gamy doesn't provide its own AI. You connect your own account with an AI service, either by logging in or by entering your own API key. That service's terms, privacy policy, prices and limits apply to your use of it. You're responsible for your account, your key and any costs on it. Gamy is not affiliated with or endorsed by any AI service.
+3. YOUR CONTENT
+3.1 You may upload only material that you own or are permitted to use.
+3.2 You keep all rights you hold in your content. You are solely responsible for the content you upload and the messages you type.
 
-4. YOUR INFORMATION AND PRIVACY
-• Gamy has no accounts and does not collect, sell or share any personal information. It has no ads, analytics or trackers.
-• Your subjects, modules, quizzes, scores, settings and AI key are saved only on your device. Deleting a module, a subject or the app removes them, and "Delete all my data" in Settings removes everything at once.
-• When you make a quiz or chat, Gamy sends the module text and your messages straight from your device to the AI service you connected. We never receive or see them. The AI service may process or store them as described in its own privacy policy, so don't upload private information about yourself or other people.
-• Photos of modules are read on your device. Only the text found in them is kept and used like any other module.
-• If you tap Report on a quiz question, Gamy opens a Google Form with that question filled in. Nothing is sent unless you submit the form, and Google's privacy policy applies to it.
+4. PRIVACY
+4.1 Information kept on your device. Your subjects, modules, quizzes, scores, chats and settings are stored on your device. Deleting a module, a subject or the application removes them from the device, and "Delete all my data" in Settings removes all of them at once.
+4.2 No selling or tracking. We do not sell, rent or share your personal information. Gamy contains no advertising, analytics or tracking tools.
+4.3 Photos. Photos of modules are read on your device; only the text found in them is kept.
+4.4 Optional AI models. If you enable Gamy's brain in Settings, two AI models are downloaded once from Hugging Face: Qwen3 (Apache 2.0 license), which writes answers, and EmbeddingGemma, which powers smart search. Only the download requests leave your device. EmbeddingGemma is provided under and subject to the Gemma Terms of Use found at ai.google.dev/gemma/terms.
+4.5 Wikipedia lookups. When you are online and your modules do not contain the answer to a chat question, or to explain an incorrect quiz answer, Gamy may send the search words (your question or the quiz term) to Wikipedia and display a short excerpt with its source. Your modules and personal details are never sent. Wikipedia's privacy policy applies to those searches, and its content may contain errors.
+4.6 Reports. If you use the Report function on a quiz question, a Google Form opens with that question filled in. Nothing is sent unless you submit the form.
 
-5. YOUR CONTENT
-Only upload material you own or have permission to use. You keep whatever rights you have in your content, and you're responsible for what you upload and type.
+5. GOOGLE SIGN-IN AND YOUR ACCOUNT
+5.1 Signing in is optional. Without an account, your lessons are stored only on your device and cannot be recovered if you reinstall Gamy or use another device.
+5.2 If you sign in with Google, a copy of your subject names and module text is stored in Google Firebase (servers in Singapore), linked to your Google account's email address and user identifier, so that you can restore your lessons. Only you can access this copy. Scores, chats, settings and quiz answers remain on your device.
+5.3 Signing out keeps your lessons on the device. Selecting "Delete account" in Settings permanently erases the online copy and your account. Lessons on your device remain until you delete them.
+5.4 Google's privacy policy applies to Google Sign-In and Firebase.
 
-6. ACCEPTABLE USE
-Don't use Gamy to break the law, to cheat where it isn't allowed, to harass anyone, or to try to make the AI produce harmful content. Follow your AI service's usage rules.
+6. DATA PRIVACY ACT
+6.1 We process personal information in accordance with the Data Privacy Act of 2012 (Republic Act No. 10173) of the Philippines.
+6.2 You may request access to, correction of, or deletion of your personal information through the contact details in Section 12. "Delete account" carries out deletion immediately.
 
-7. AI CAN BE WRONG
-Quizzes, answers and explanations are made by AI and may be wrong, incomplete or outdated. Check important information against your module, books or teacher. Gamy is a study aid, not a replacement for your lessons.
+7. ACCEPTABLE USE
+You agree not to use Gamy to violate any law, to cheat where doing so is not permitted, or to harass any person.
 
-8. GAMY'S PERSONALITY
-Gamy is blunt and sarcastic on purpose. He roasts answers, not people. If the AI ever says something offensive or harmful, don't rely on it, and report it to your AI service.
+8. LIMITATIONS OF AUTOMATED CONTENT
+8.1 Quizzes, answers, solutions and explanations are generated automatically and may be inaccurate, incomplete or outdated.
+8.2 You should verify important information against your module, references or instructor. Gamy is a study aid and does not replace your lessons.
+8.3 Gamy's humor is blunt and sarcastic by design. It is directed at answers, never at any person.
 
-9. NO WARRANTY
-Gamy is provided "as is", without warranties of any kind. We don't promise that it will always work, be error-free or be available.
+9. GAMY PRO
+Certain features may be offered through a paid subscription ("Gamy Pro"). Prices, billing and cancellation are handled by the app store through which you subscribe, under its own terms.
 
-10. LIMITATION OF LIABILITY
-To the extent the law allows, we are not liable for any loss or damage from using Gamy, including grades, exam results, lost data or charges on your AI account.
+10. DISCLAIMER AND LIMITATION OF LIABILITY
+10.1 Gamy is provided "as is" and "as available", without warranties of any kind.
+10.2 To the extent permitted by law, we are not liable for any loss or damage arising from your use of Gamy, including academic results or lost data.
 
-11. CHANGES
-We may update these terms. If we make important changes, Gamy will ask you to agree again.
+11. CHANGES TO THIS AGREEMENT
+We may update this Agreement. If the changes are material, Gamy will ask you to review and accept the updated Agreement before continuing.
 
 12. CONTACT
-(contact details to be added before release)''';
+(Contact details to be added before release.)''';

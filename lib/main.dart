@@ -1,6 +1,8 @@
 import 'package:flutter/material.dart';
 import 'package:pdfrx/pdfrx.dart';
 
+import 'account.dart';
+import 'brain.dart';
 import 'chat.dart';
 import 'gamy.dart';
 import 'quiz.dart';
@@ -13,6 +15,8 @@ void main() async {
   WidgetsFlutterBinding.ensureInitialized();
   pdfrxFlutterInitialize();
   await store.load();
+  await account.start(); // Firebase (optional Google account); Gamy works without it
+  brain.start(); // loads Gamy's brain in the background if it was downloaded before
   runApp(const GamyApp());
 }
 
@@ -27,19 +31,18 @@ class _GamyAppState extends State<GamyApp> {
 
   @override
   Widget build(BuildContext context) => ListenableBuilder(
-        listenable: store,
+        listenable: Listenable.merge([store, account]),
         builder: (context, _) => MaterialApp(
           title: 'Gamy',
+          debugShowCheckedModeBanner: false,
           theme: _theme(Brightness.light),
           darkTheme: _theme(Brightness.dark),
           themeMode: store.dark ? ThemeMode.dark : ThemeMode.light,
-          home: !store.agreed || store.key == null
+          home: !store.agreed // first launch: age check and terms
               ? Setup() // not const, so it redraws when the store changes
               : Builder(builder: (context) {
-            final wide = MediaQuery.sizeOf(context).width >= 700;
-            // In Chat, Gamy stands center stage (see chat.dart). In Quiz he sits bottom-left on big screens
-            // while the quiz is made and answered; on the result he moves to the middle (see quiz.dart).
-            final showGamy = tab == 1 && wide && const ['idle', 'think'].contains(store.moods[1]);
+            // In Chat, Gamy stands center stage (see chat.dart). The quiz uses the whole screen; Gamy only
+            // shows up on its score (see quiz.dart).
             return Scaffold(
               appBar: AppBar(
                 leading: Padding(padding: const EdgeInsets.all(8), child: Image.asset('assets/gamy/head.png')),
@@ -55,22 +58,21 @@ class _GamyAppState extends State<GamyApp> {
               body: Column(children: [
                 Padding(
                   padding: const EdgeInsets.all(8),
-                  child: SegmentedButton<int>(
-                    segments: [
-                      ButtonSegment(value: 0, icon: const Icon(Icons.chat), label: Text(store.t('chat'))),
-                      ButtonSegment(value: 1, icon: const Icon(Icons.quiz), label: Text(store.t('quiz'))),
-                      ButtonSegment(value: 2, icon: const Icon(Icons.upload_file), label: Text(store.t('upload'))),
-                    ],
-                    selected: {tab},
-                    onSelectionChanged: (s) => setState(() => tab = s.first),
+                  // Shrinks the tab buttons if they don't fit (small phones, longer Filipino labels)
+                  child: FittedBox(
+                    fit: BoxFit.scaleDown,
+                    child: SegmentedButton<int>(
+                      segments: [
+                        ButtonSegment(value: 0, icon: const Icon(Icons.chat), label: Text(store.t('chat'))),
+                        ButtonSegment(value: 1, icon: const Icon(Icons.quiz), label: Text(store.t('quiz'))),
+                        ButtonSegment(value: 2, icon: const Icon(Icons.upload_file), label: Text(store.t('upload'))),
+                      ],
+                      selected: {tab},
+                      onSelectionChanged: (s) => setState(() => tab = s.first),
+                    ),
                   ),
                 ),
-                Expanded(
-                  child: Row(crossAxisAlignment: CrossAxisAlignment.end, children: [
-                    if (showGamy) QuizBuddy(), // not const, so his bubble and pose update
-                    Expanded(child: IndexedStack(index: tab, children: [Chat(), Quiz(), Upload()])),
-                  ]),
-                ),
+                Expanded(child: IndexedStack(index: tab, children: [Chat(), Quiz(), Upload()])),
               ]),
             );
           }),

@@ -4,19 +4,29 @@ import 'dart:io';
 import 'package:archive/archive.dart';
 import 'package:file_picker/file_picker.dart';
 import 'package:flutter/foundation.dart';
-import 'package:flutter_secure_storage/flutter_secure_storage.dart';
 import 'package:google_mlkit_text_recognition/google_mlkit_text_recognition.dart';
 import 'package:path_provider/path_provider.dart';
 import 'package:pdfrx/pdfrx.dart';
+import 'package:sqlite3/sqlite3.dart';
 
+import 'account.dart';
+import 'brain.dart';
+import 'rules.dart';
 import 'strings.dart';
 import 'terms.dart';
 
 final store = Store();
 const _maxBytes = 20 * 1024 * 1024;
-const _vault = FlutterSecureStorage(); // the device's locked storage (Windows Credential Manager / Android Keystore)
 
-// Everything is saved only on this device: the AI key in locked storage, the rest in one small JSON file.
+// Everything is saved on this device (a copy of subjects and modules also goes online when signed in,
+// see account.dart), in a SQLite database (gamy.db) with four tables:
+//   settings (key, value) · subjects (id, name) · modules (id, subject_id, name, text)
+//   scores (id, subject_id, module, type, correct, total, date)
+//   chunks (id, module_id, text, vec): pieces of each module with their meaning vectors, for smart search
+// Each change writes only its own row. Older versions saved one JSON file (gamy.json): it is moved into
+// the database once, then deleted.
+const _dataVersion = 2; // raise this when the tables change, and upgrade older saves in _upgrade()
+
 class Store extends ChangeNotifier {
   String lang = 'en';
   bool dark = false; // night mode
@@ -25,37 +35,105 @@ class Store extends ChangeNotifier {
   int uploads = 0; // modules ever uploaded; deleting doesn't give uploads back
   int weekItems = 0; // quiz items made this week
   String? weekStart; // when this week's count started
-  String? key, url, model; // the student's own AI account; url == null means OpenRouter login (key lives in _vault)
   bool get agreed => agreedTo == termsVersion;
   List<String> moods = ['idle', 'idle']; // Gamy's sprite in Chat, Quiz
+  // In memory the same shape as before, so the screens don't change:
+  // [{id, name, modules: [{id, name, text}], scores: [{module, type, right, total, date}]}]
   List<Map<String, dynamic>> subjects = [];
-  late File _file;
+  Database? _db;
 
   String t(String k) => strings[lang]![k]!;
 
   Future<void> load() async {
-    _file = File('${(await getApplicationSupportDirectory()).path}/gamy.json');
-    if (_file.existsSync()) {
-      Map j = {};
-      try {
-        j = jsonDecode(_file.readAsStringSync());
-      } catch (_) {} // damaged save file: start fresh instead of crashing
-      lang = j['lang'] ?? 'en';
-      agreedTo = j['agreedTo'];
-      dark = j['dark'] ?? false;
-      uploads = j['uploads'] ?? 0;
-      weekItems = j['weekItems'] ?? 0;
-      weekStart = j['weekStart'];
-      url = j['url'];
-      model = j['model'];
-      subjects = List<Map<String, dynamic>>.from(j['subjects'] ?? []);
-      if (j['key'] != null) connect(j['key'], url, model); // move an old plain-file key into locked storage
-    }
-    key ??= await _vault.read(key: 'ai_key');
+    final dir = (await getApplicationSupportDirectory()).path;
+    _db?.close();
+    final db = _db = sqlite3.open('$dir/gamy.db');
+    _upgrade(db, File('$dir/gamy.json'));
+    final s = {for (final r in db.select('SELECT key, value FROM settings')) r['key'] as String: r['value'] as String?};
+    lang = s['lang'] ?? 'en';
+    dark = s['dark'] == 'true';
+    agreedTo = s['agreedTo'];
+    uploads = int.tryParse(s['uploads'] ?? '') ?? 0;
+    weekItems = int.tryParse(s['weekItems'] ?? '') ?? 0;
+    weekStart = s['weekStart'];
+    subjects = [
+      for (final r in db.select('SELECT id, name FROM subjects ORDER BY id'))
+        {
+          'id': r['id'],
+          'name': r['name'],
+          // <Map>: lets new modules and scores (plain maps from the screens) be added to these lists later
+          'modules': <Map>[
+            for (final m in db.select('SELECT id, name, text FROM modules WHERE subject_id = ? ORDER BY id', [r['id']]))
+              {'id': m['id'], 'name': m['name'], 'text': cleanPrivate(m['text'] as String)}
+          ],
+          'scores': <Map>[
+            for (final x in db.select(
+                'SELECT module, type, correct, total, date FROM scores WHERE subject_id = ? ORDER BY id', [r['id']]))
+              {'module': x['module'], 'type': x['type'], 'right': x['correct'], 'total': x['total'], 'date': x['date']}
+          ],
+        }
+    ];
   }
 
+  // Closes the database (tests use this; the app keeps it open while running).
+  void close() {
+    _db?.close();
+    _db = null;
+  }
+
+  // First launch: creates the tables, and moves an old gamy.json save into them (once), all in one go.
+  void _upgrade(Database db, File old) {
+    if ((db.select('PRAGMA user_version').first['user_version'] as int) >= _dataVersion) return;
+    db.execute('BEGIN');
+    for (final sql in [
+      'CREATE TABLE IF NOT EXISTS settings (key TEXT PRIMARY KEY, value TEXT)',
+      'CREATE TABLE IF NOT EXISTS subjects (id INTEGER PRIMARY KEY, name TEXT NOT NULL)',
+      'CREATE TABLE IF NOT EXISTS modules (id INTEGER PRIMARY KEY, subject_id INTEGER, name TEXT NOT NULL, text TEXT NOT NULL)',
+      'CREATE TABLE IF NOT EXISTS scores (id INTEGER PRIMARY KEY, subject_id INTEGER, module TEXT, type TEXT, '
+          'correct INTEGER, total INTEGER, date TEXT)',
+      'CREATE TABLE IF NOT EXISTS chunks (id INTEGER PRIMARY KEY, module_id INTEGER, text TEXT NOT NULL, vec BLOB NOT NULL)',
+    ]) {
+      db.execute(sql);
+    }
+    if (old.existsSync()) {
+      try {
+        final j = jsonDecode(old.readAsStringSync()) as Map;
+        for (final k in ['lang', 'agreedTo', 'dark', 'uploads', 'weekItems', 'weekStart']) {
+          if (j[k] != null) db.execute('INSERT OR REPLACE INTO settings VALUES (?, ?)', [k, '${j[k]}']);
+        }
+        for (final s in j['subjects'] ?? []) {
+          db.execute('INSERT INTO subjects (name) VALUES (?)', [s['name']]);
+          _insertAll(db, db.lastInsertRowId, s['modules'] ?? [], s['scores'] ?? []);
+        }
+      } catch (_) {} // damaged old save file: start fresh instead of crashing
+    }
+    db.execute('PRAGMA user_version = $_dataVersion');
+    db.execute('COMMIT');
+    if (old.existsSync()) old.deleteSync(); // it's in the database now
+  }
+
+  static void _insertAll(Database db, Object? subjectId, List modules, List scores) {
+    for (final m in modules) {
+      db.execute('INSERT INTO modules (subject_id, name, text) VALUES (?, ?, ?)', [subjectId, m['name'], m['text']]);
+    }
+    for (final x in scores) {
+      db.execute('INSERT INTO scores (subject_id, module, type, correct, total, date) VALUES (?, ?, ?, ?, ?, ?)',
+          [subjectId, x['module'], x['type'], x['right'], x['total'], x['date']]);
+    }
+  }
+
+  // Saves the settings (a few small rows) and redraws the app.
   void _save() {
-    _file.writeAsStringSync(jsonEncode({'lang': lang, 'agreedTo': agreedTo, 'dark': dark, 'uploads': uploads, 'weekItems': weekItems, 'weekStart': weekStart, 'url': url, 'model': model, 'subjects': subjects}));
+    for (final (k, v) in [
+      ('lang', lang),
+      ('agreedTo', agreedTo),
+      ('dark', '$dark'),
+      ('uploads', '$uploads'),
+      ('weekItems', '$weekItems'),
+      ('weekStart', weekStart),
+    ]) {
+      _db!.execute('INSERT OR REPLACE INTO settings VALUES (?, ?)', [k, v]);
+    }
     notifyListeners();
   }
 
@@ -66,14 +144,6 @@ class Store extends ChangeNotifier {
 
   void agree() {
     agreedTo = termsVersion;
-    _save();
-  }
-
-  void connect(String? k, [String? u, String? m]) {
-    key = k;
-    k == null ? _vault.delete(key: 'ai_key') : _vault.write(key: 'ai_key', value: k);
-    url = u;
-    model = m;
     _save();
   }
 
@@ -102,12 +172,15 @@ class Store extends ChangeNotifier {
     _save();
   }
 
-  // "Delete all my data": removes subjects, modules, scores and the AI key, and asks for the terms again.
+  // "Delete all my data": removes subjects, modules and scores, and asks for the terms again.
   // The free-plan counters stay, so deleting doesn't reset the free limits.
   void reset() {
+    for (final table in ['subjects', 'modules', 'scores', 'chunks']) {
+      _db!.execute('DELETE FROM $table');
+    }
     subjects = [];
     agreedTo = null;
-    connect(null); // also deletes the key from locked storage and saves
+    _save();
   }
 
   void setMood(int tab, String m) {
@@ -116,33 +189,93 @@ class Store extends ChangeNotifier {
   }
 
   void addSubject(String name) {
-    subjects.add({'name': name, 'modules': [], 'scores': []});
-    _save();
+    _db!.execute('INSERT INTO subjects (name) VALUES (?)', [name]);
+    subjects.add({'id': _db!.lastInsertRowId, 'name': name, 'modules': [], 'scores': []});
+    notifyListeners();
+    account.saveSubject(name);
   }
 
-  void remove(List list, Object item) {
+  // ----- Restoring from the online copy (account.dart). These don't send anything back online. -----
+  Map subjectNamed(String name) {
+    for (final s in subjects) {
+      if (s['name'] == name) return s;
+    }
+    _db!.execute('INSERT INTO subjects (name) VALUES (?)', [name]);
+    final s = {'id': _db!.lastInsertRowId, 'name': name, 'modules': [], 'scores': []};
+    subjects.add(s);
+    notifyListeners();
+    return s;
+  }
+
+  // A restored module doesn't count as an upload (the free plan counted it the first time).
+  void restoreModule(Map subject, String name, String text) {
+    _put(subject, name, cleanPrivate(text));
+    notifyListeners();
+  }
+
+  int _put(Map subject, String name, String text) {
+    _insertAll(_db!, subject['id'], [
+      {'name': name, 'text': text}
+    ], const []);
+    final id = _db!.lastInsertRowId;
+    (subject['modules'] as List).add({'id': id, 'name': name, 'text': text});
+    return id;
+  }
+
+  // Deletes a subject (with its modules and scores) or one module.
+  // [online]: false when the module is being replaced by one with the same name (the upload overwrites it online).
+  void remove(List list, Map item, {bool online = true}) {
+    if (online && item.containsKey('modules')) {
+      account.deleteSubject(item['name']);
+    } else if (online && account.user != null) {
+      account.deleteModule(subjects.firstWhere((s) => identical(s['modules'], list))['name'], item['name']);
+    }
     list.remove(item);
-    _save();
+    if (item.containsKey('modules')) {
+      _db!.execute('DELETE FROM chunks WHERE module_id IN (SELECT id FROM modules WHERE subject_id = ?)', [item['id']]);
+      for (final table in ['modules', 'scores']) {
+        _db!.execute('DELETE FROM $table WHERE subject_id = ?', [item['id']]);
+      }
+      _db!.execute('DELETE FROM subjects WHERE id = ?', [item['id']]);
+    } else {
+      _db!.execute('DELETE FROM chunks WHERE module_id = ?', [item['id']]);
+      _db!.execute('DELETE FROM modules WHERE id = ?', [item['id']]);
+    }
+    notifyListeners();
   }
 
   void addScore(Map subject, Map score) {
+    _insertAll(_db!, subject['id'], const [], [score]);
     (subject['scores'] as List).add(score);
-    _save();
+    notifyListeners();
   }
 
-  // Returns an error key, or null when the module was added (or picking was cancelled).
-  Future<String?> addModule(Map subject) async {
+  // Picks one or more files at once; each becomes its own module. Returns one line per file that failed
+  // ("name: reason"), plus 'pro_uploads' at the end if the free plan ran out of uploads halfway.
+  // [ask] is called when a file is already in this subject (same name or same text) and answers
+  // 'both', 'replace' or 'cancel'.
+  Future<List<String>> addModules(Map subject, {Future<String> Function(String name)? ask}) async {
     // Photos can only be read on phones (Google's offline text reader doesn't run on Windows).
     final files = await FilePicker.pickFiles(
         type: FileType.custom,
         allowedExtensions: ['pdf', 'docx', 'txt', if (Platform.isAndroid) ...['jpg', 'jpeg', 'png']]);
-    if (files.isEmpty) return null;
-    final f = files.first;
+    final failed = <String>[];
+    for (final f in files) {
+      if (!canUpload) return [...failed, 'pro_uploads'];
+      final err = await _addFile(subject, f, ask);
+      if (err != null) failed.add('${f.name}: ${t(err)}');
+    }
+    return failed;
+  }
+
+  // Reads one picked file into a module. Returns an error key, or null when it was added.
+  Future<String?> _addFile(Map subject, PlatformFile f, Future<String> Function(String name)? ask) async {
+    final ext = f.name.toLowerCase().split('.').last;
+    if (!pro && ['jpg', 'jpeg', 'png'].contains(ext)) return 'pro_photo'; // photo modules are a Pro feature
     if ((await f.length() ?? 0) > _maxBytes) return 'too_big';
     var text = '';
     try {
       final bytes = await f.readAsBytes();
-      final ext = f.name.toLowerCase().split('.').last;
       if (ext == 'pdf') {
         final doc = await PdfDocument.openData(bytes);
         for (final p in doc.pages) {
@@ -178,11 +311,73 @@ class Store extends ChangeNotifier {
     } catch (_) {
       return 'bad_file';
     }
-    text = text.trim();
+    text = cleanPrivate(text).trim(); // emails, phone numbers, school names... are never saved
     if (text.isEmpty) return 'no_text';
-    (subject['modules'] as List).add({'name': f.name, 'text': text});
+    // Already uploaded? Keep both (as "name (2)"), replace the old one, or skip this file.
+    final mods = subject['modules'] as List;
+    var name = f.name;
+    Map? same;
+    for (final m in mods) {
+      if (m['name'] == name || m['text'] == text) same = m;
+    }
+    if (same != null) {
+      final choice = ask == null ? 'both' : await ask(name);
+      if (choice == 'cancel') return null;
+      if (choice == 'replace') {
+        remove(mods, same, online: same['name'] != name);
+      } else {
+        for (var n = 2; mods.any((m) => m['name'] == name); n++) {
+          name = '${f.name} ($n)';
+        }
+      }
+    }
+    final id = _put(subject, name, text);
     uploads++;
     _save();
+    account.saveModule(subject['name'], name, text);
+    if (brain.searchReady) await _index(id, text); // smart search pieces, made now while the spinner shows
     return null;
   }
+
+  // ----- Smart search (needs brain.searchReady) -----
+  // The [n] module pieces closest in meaning to the question. Modules uploaded before smart search was
+  // downloaded get their pieces made on their first search.
+  Future<List<Line>> search(String question, List<Map> modules, int n) async {
+    final q = await brain.embedQuestion(question), found = <Line>[];
+    for (final m in modules) {
+      if (m['id'] == null) continue;
+      var rows = _db!.select('SELECT text, vec FROM chunks WHERE module_id = ?', [m['id']]);
+      if (rows.isEmpty) {
+        await _index(m['id'], m['text'] as String);
+        rows = _db!.select('SELECT text, vec FROM chunks WHERE module_id = ?', [m['id']]);
+      }
+      for (final r in rows) {
+        found.add((score: (closeness(q, r['vec'] as List<int>) * 1000).round(), text: r['text'] as String, module: '${m['name']}'));
+      }
+    }
+    found.sort((a, b) => b.score.compareTo(a.score));
+    return found.take(n).toList();
+  }
+
+  Future<void> _index(Object? moduleId, String text) async {
+    final parts = chunks(text);
+    if (parts.isEmpty) return;
+    final vectors = await brain.embedChunks(parts);
+    for (var i = 0; i < parts.length; i++) {
+      _db!.execute('INSERT INTO chunks (module_id, text, vec) VALUES (?, ?, ?)', [moduleId, parts[i], vectorBytes(vectors[i])]);
+    }
+  }
+}
+
+// A meaning vector is stored as raw float32 bytes (768 numbers = 3 KB per piece).
+Uint8List vectorBytes(List<double> v) => Float32List.fromList(v).buffer.asUint8List();
+
+// How close a stored piece is to the question in meaning: 1 = same meaning, 0 = unrelated.
+double closeness(List<double> question, List<int> stored) {
+  final v = Float32List.view(Uint8List.fromList(stored).buffer);
+  var dot = 0.0;
+  for (var i = 0; i < v.length && i < question.length; i++) {
+    dot += v[i] * question[i];
+  }
+  return dot;
 }

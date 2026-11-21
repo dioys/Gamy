@@ -1,0 +1,10 @@
+{
+  "name": "gamy-firestore-rules-tests",
+  "private": true,
+  "type": "module",
+  "description": "Tests that try to break Gamy's Firestore security rules, on the local emulator.",
+  "devDependencies": {
+    "@firebase/rules-unit-testing": "^6.0.0",
+    "firebase": "^13.4.0"
+  }
+}

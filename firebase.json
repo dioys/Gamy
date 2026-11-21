@@ -1,0 +1,31 @@
+{
+  "flutter": {
+    "platforms": {
+      "android": {
+        "default": {
+          "projectId": "gamy-dev",
+          "appId": "1:366280076823:android:09c66170036958de0df652",
+          "fileOutput": "android/app/google-services.json"
+        }
+      },
+      "dart": {
+        "lib/firebase_options.dart": {
+          "projectId": "gamy-dev",
+          "configurations": {
+            "android": "1:366280076823:android:09c66170036958de0df652",
+            "windows": "1:366280076823:web:8651cea8f0b23f0a0df652"
+          }
+        }
+      }
+    }
+  },
+  "firestore": {
+    "rules": "firestore/firestore.rules"
+  },
+  "emulators": {
+    "firestore": {
+      "port": 8080
+    },
+    "singleProjectMode": true
+  }
+}

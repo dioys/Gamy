@@ -1,58 +1,128 @@
-import 'dart:convert';
-import 'dart:math';
+import 'dart:async';
 
 import 'package:flutter/material.dart';
 import 'package:flutter/services.dart';
 import 'package:url_launcher/url_launcher.dart';
 
-import 'ai.dart';
+import 'brain.dart';
 import 'gamy.dart';
 import 'paywall.dart';
+import 'rules.dart';
+import 'solve.dart';
 import 'store.dart';
+import 'wiki.dart';
 
 class Q {
   final String type, q, answer, why, hint;
+  final String topic; // what to look up on Wikipedia for "More about..." in the review ('' = nothing)
   final List<String> choices;
   final Map<String, String> wrong; // what each wrong option actually is
-  const Q(this.type, this.q, this.answer, this.why, this.hint, {this.choices = const [], this.wrong = const {}});
+  const Q(this.type, this.q, this.answer, this.why, this.hint,
+      {this.choices = const [], this.wrong = const {}, this.topic = ''});
 }
 
-const _kinds = {
-  'mc': 'multiple choice questions with exactly 4 choices',
-  'tf': 'true or false questions',
-  'fill': 'fill in the blank questions',
-  'id': 'identification questions (the question describes something; the answer is its name or term)',
-  'mix': 'questions, mixing multiple choice, true or false, fill in the blank and identification',
-};
-
 // Quiz types that need Gamy Pro (free: multiple choice, true or false, identification).
-const _proTypes = {'fill', 'match', 'mix'};
+const _proTypes = {'fill', 'match', 'mix', 'solve'};
 
 // Paste your Google Form's pre-filled link here, with the word QUESTION where the details go.
 // While it's empty, the Report button stays hidden.
 const reportForm = '';
 
-// Gamy's comment on the final score, from best to worst: perfect, 70%+, 40%+, below.
-const _roasts = {
+// Gamy's verdict on the score, by band: high (80% and up), middle (50% and up), low (below 50%).
+// 50 lines per language (17 / 16 / 17), picked at random. No mercy for the score, never for the person.
+// Picks the next of [n] lines for [key] without repeating any until all of them were used (a shuffled deck).
+final _decks = <String, List<int>>{};
+int nextLine(String key, int n) {
+  final deck = _decks[key] ??= [];
+  if (deck.isEmpty) deck.addAll(List.generate(n, (i) => i)..shuffle());
+  return deck.removeLast();
+}
+
+// What Gamy says when nobody answered anything for 45 seconds (in the quiz bubble, or a message on phones).
+const teases = {
   'en': [
-    ["Perfect. Don't let it go to your head.", 'Not bad. I almost had nothing to roast.', 'Flawless. Who are you and what did you do with my student?'],
-    ['Decent. Now fix the ones you missed.', 'Pretty good. Pretty. Not perfect.', 'You studied. I can tell. Barely.'],
-    ['Half right is also half wrong.', 'That was... a choice. Review and try again.', 'Did you read the module or just look at it?'],
-    ["Oof. Even I'm embarrassed, and I'm a bear.", 'Did you answer with your eyes closed?', "Let's pretend that didn't happen. Review time."],
+    "What's taking you so long? Is it that hard?",
+    "Bro, the question isn't going to answer itself.",
+    "I've seen sloths answer faster. And they don't even study.",
+    'Tick tock. My fur is turning gray here.',
+    "Staring at it won't make the answer appear, bro.",
+    'Did you fall asleep? Blink twice if you need help.',
+    'Take your time... but not ALL of it.',
+    "Even my grandma would've finished by now. She's a bear. She can't read.",
+    'Are you reading the question or memorizing it?',
+    'Big yikes. Still nothing?',
+    'Hint: the answer is in your module. Which you read. Right?',
+    "I hibernate for months and you're making that look short.",
+    'Should I get comfortable? Feels like a long one.',
+    "You know there's a Hint button, right?",
+    'Breathe. Think. Then actually type something.',
+    'No pressure. Just your whole grade.',
+    "The clock's moving, bro. Your answers aren't.",
+    'Plot twist: a guess also counts as an answer.',
+    "If overthinking were a subject, you'd ace it.",
+    'Somewhere, a deadline is laughing at you.',
   ],
   'fil': [
-    ['Perpekto. Huwag kang magyabang.', 'Ayos. Wala akong maibanat.', 'Walang mali? Sino ka at nasaan ang estudyante ko?'],
-    ["Pwede na. Ayusin mo 'yung mga mali.", 'Maganda. Maganda lang, hindi perpekto.', 'Nag-aral ka, halata. Medyo.'],
-    ['Kalahating tama, kalahating mali rin.', "Ano 'yon? Mag-review ka ulit.", 'Binasa mo ba ang module o tiningnan lang?'],
-    ['Aray. Pati ako nahiya, at oso ako.', 'Nakapikit ka ba habang sumasagot?', "Kunwari hindi nangyari 'yan. Review na."],
+    'Ano ba, ang tagal mo naman. Ganun ba kahirap?',
+    'Boi, hindi sasagot ang tanong nang mag-isa.',
+    'Kapag may tiyaga, may nilaga... pero ikaw, puro tiyaga, walang sagot.',
+    'Nasa huli ang pagsisisi. Kaya sumagot ka na ngayon.',
+    'Ang hindi lumingon sa module, hindi makakasagot sa quiz.',
+    'Aanhin pa ang oras kung hindi ka rin naman sasagot?',
+    'Huy, gising ka pa ba? Kumurap ka nang dalawang beses kung kailangan mo ng tulong.',
+    'Mas mabilis pang mag-load ang data ko kaysa sa sagot mo, boi.',
+    'Titigan mo pa, baka sumagot ang tanong. Joke lang, hindi.',
+    'Dahan-dahan lang... pero hindi naman ganyan kabagal.',
+    "May Hint button, alam mo ba 'yon?",
+    'Ang lala, wala pa ring sagot?',
+    "Walang pressure. Grade mo lang naman 'yan.",
+    'Habang may buhay, may pag-asa. Habang walang sagot, may bagsak.',
+    "Bahala na? Hindi pwede 'yan sa quiz, boi.",
+    'Pumuti na ang balahibo ko kakahintay.',
+    'Ang sobrang pag-iisip, nakakabaliw. Ang hindi pagsagot, nakakabagsak.',
+    'Plot twist: ang hula, sagot din.',
+    'Para kang jeep na naghihintay mapuno. Ang tagal!',
+    'Ang tunay na kaibigan, nakikilala sa gipitan. Ang tunay na estudyante, sumasagot.',
+  ],
+};
+
+const roasts = {
+  'en': [
+    ["Got lucky, huh?", "Okay, who gave you the answers?", "Not bad... for a human.", "Show-off.",
+     "Did you study, or did you sell your soul?", "Fine, I’m impressed. Don’t let it go to your head.",
+     "Calm down, Einstein.", "Suspiciously good.", "Wow, you actually opened the book this time.",
+     "Big brain energy.", "Was that skill or a glitch?", "I’ll allow it.", "Someone’s been drinking their milk.",
+     "Teacher’s pet detected.", "Who are you, and what did you do with the real you?", "Flex detected.",
+     "Okay okay, you cooked."],
+    ["Meh. Could be worse.", "Half a brain, full effort.", "Studying on one neuron?", "Almost. Almost.",
+     "The bare minimum, as usual.", "Passing... barely breathing.", "You guessed half of those, didn’t you?",
+     "Mid. Very mid.", "Close, but no trophy.", "That neuron needs a friend.", "You skimmed, didn’t you?",
+     "Respectable. Barely.", "C’s get degrees, I guess.", "Was that a 50/50 or a coin flip?",
+     "Getting there... slowly.", "Points for showing up."],
+    ["Okay... that was dumb.", "Did you even review??", "Bro answered with vibes.", "Were you asleep?",
+     "Did you even read the questions?", "I’ve seen better scores from a cat on a keyboard.", "That’s... a choice.",
+     "Your brain went on vacation without you.", "Loading intelligence... failed.",
+     "Did you study the wrong subject?", "The answers were right there.", "Not your day, huh?",
+     "Reset and try again. Please.", "Error 404: brain not found.", "You good? Blink twice.",
+     "Random guessing would’ve scored higher.", "Let’s pretend this never happened."],
+  ],
+  'fil': [
+    ["Ang lupit!", "Sana all matalino.", "Tsamba lang yan, boi.", "Sino nagbigay ng sagot?",
+     "Grabe, nag-aral ka pala?", "Ikaw na. Ikaw na talaga.", "Petmalu!", "Lodi!", "Ay, may utak naman pala.",
+     "Sige na, ikaw na bida.", "Kinabahan ako sa’yo ah.", "Yabang mo na niyan?", "Nakakagulat, seryoso.",
+     "Henyo ka ba o swerte lang?", "Uminom ka ba ng vitamins?", "Pak! Ganern!", "Walang kupas!"],
+    ["Pwede na.", "Pasang-awa.", "Medyo lang, ‘di ba?", "Isang neuron lang ba gumagana?", "Konti na lang!",
+     "Hula-hula lang no?", "Sakto lang.", "Hindi masama, hindi rin maganda.", "Kalahating utak, kalahating swerte.",
+     "Nag-review ka ba o nag-scroll lang?", "Pwede pa ‘yan galingan.", "Ayos na rin, kesa wala.", "Muntik na!",
+     "Eeny meeny miny mo ba ‘yan?", "Tiyaga lang, aabot ka rin.", "Mid ka today, pre."],
+    ["Kailangan mo na magkape.", "Kulang sa kiss?", "Ano ba ‘yan?!", "Nag-review ka ba talaga?",
+     "Tulog ka ba habang sumasagot?", "Lutang ka na naman.", "Ay, sayang.", "Hala, anyare?", "Utak, nasaan ka?",
+     "Kulang sa tulog ‘yan.", "Hindi ka pa kumakain no?", "Mas mataas pa score ng pusa namin.", "Ulitin mo, dali.",
+     "Grabe, wala man lang?", "Charot lang ba ‘yan?", "Hay naku, anak.", "Kalimutan na lang natin ‘to."],
   ],
 };
 
 String _cap(String s) => s.isEmpty ? s : s[0].toUpperCase() + s.substring(1).toLowerCase();
-
-// The AI answers with JSON; free models sometimes wrap it in extra text, so cut out the [...] part.
-dynamic _json(String s, String open, String close) =>
-    jsonDecode(s.substring(s.indexOf(open), s.lastIndexOf(close) + 1));
 
 class Quiz extends StatefulWidget {
   const Quiz({super.key});
@@ -60,8 +130,12 @@ class Quiz extends StatefulWidget {
   State<Quiz> createState() => _QuizState();
 }
 
+// Most text one quiz may use (about 100 pages). More would take too long to read and make into questions.
+const maxQuizChars = 200000;
+
 class _QuizState extends State<Quiz> {
-  int? pick;
+  int? pick; // which subject (folder)
+  final chosen = <Map>{}; // which of its modules go into the quiz
   int count = 10;
   String type = 'mc';
   Map? subject;
@@ -69,34 +143,85 @@ class _QuizState extends State<Quiz> {
   List<Q>? qs;
   final answers = <int, String>{};
   final hints = <int>{};
-  final fillWhy = <int, String>{}; // AI's explanation of wrong typed answers
-  bool busy = false, done = false, review = false;
+  final explain = <int, String>{}; // the brain's explanation of a wrong typed answer
+  final more = <int, WikiPage>{}; // "More about..." from Wikipedia for wrong answers (online only)
+  final _scroll = ScrollController();
+  final _cards = <int, GlobalKey>{}; // to scroll to a question (the first blank one)
+  final _blank = <int>{}; // questions left blank when "Check" was pressed: highlighted until answered
+  Timer? _idle; // Gamy teases after 45 seconds without any answer
+  bool done = false, review = false;
   String roast = '';
 
-  List<(Map, Map)> get _mods => [
-        for (final s in store.subjects)
-          for (final m in s['modules']) (s, m as Map)
-      ];
+  List<Map> get _folders => [for (final s in store.subjects) if ((s['modules'] as List).isNotEmpty) s];
 
-  // Typed answers are compared loosely: "CPU." and "cpu" both match "CPU".
-  String _norm(String s) => s.toLowerCase().replaceAll(RegExp(r'[^\p{L}\p{N} ]', unicode: true), '').replaceAll(RegExp(r'\s+'), ' ').trim();
-  bool _ok(int i) => _norm(answers[i] ?? '') == _norm(qs![i].answer);
-  int get _right => [for (var i = 0; i < qs!.length; i++) if (_ok(i)) i].length;
+  // Typed answers are compared loosely: capitals, hyphens, extra spaces, punctuation and a leading "the" don't
+  // matter ("CPU." = "cpu", "random access memory" = "Random-access memory").
+  String _norm(String s) => s
+      .toLowerCase()
+      .replaceAll(RegExp(r'[^\p{L}\p{N}]+', unicode: true), ' ')
+      .trim()
+      .replaceFirst(RegExp(r'^(the|a|an|ang|mga) '), '');
 
-  void _error(Object e) {
-    if (e == 'limit') {
-      showAiLimit(context);
-      return;
-    }
-    final k = e is String && ['slow', 'ai_error', 'bad_key', 'offline'].contains(e) ? e : 'bad_quiz';
-    ScaffoldMessenger.of(context).showSnackBar(SnackBar(content: Text(store.t(k))));
+  // Every answer restarts the 45-second wait (and removes that question's "no answer yet" mark).
+  void _answered(int i, String v) {
+    setState(() {
+      answers[i] = v;
+      if (v.trim().isNotEmpty) _blank.remove(i);
+    });
+    _wait();
   }
 
-  // One question from the AI's JSON, or null if it's broken.
+  void _wait() {
+    _idle?.cancel();
+    if (qs != null && !done) _idle = Timer(const Duration(seconds: 45), _tease);
+  }
+
+  void _tease() {
+    if (!mounted || qs == null || done) return;
+    final lines = teases[store.lang]!, line = lines[nextLine('tease${store.lang}', lines.length)];
+    // A message bar at the bottom (the quiz uses the whole screen, so Gamy isn't beside it).
+    ScaffoldMessenger.of(context)
+      ..hideCurrentSnackBar() // a new message replaces the old one instead of waiting behind it
+      ..showSnackBar(SnackBar(content: Text('🐻 $line'), duration: const Duration(seconds: 8)));
+    _wait(); // and again in 45 seconds if still nothing
+  }
+
+  void _stopTeasing() => _idle?.cancel();
+
+  @override
+  void dispose() {
+    _idle?.cancel();
+    _scroll.dispose();
+    super.dispose();
+  }
+
+  Future<void> _quit() async {
+    final yes = await showDialog<bool>(
+      context: context,
+      builder: (ctx) => AlertDialog(
+        content: Text(store.t('quit_confirm')),
+        actions: [
+          TextButton(onPressed: () => Navigator.pop(ctx), child: Text(store.t('cancel'))),
+          FilledButton(onPressed: () => Navigator.pop(ctx, true), child: Text(store.t('quit_quiz'))),
+        ],
+      ),
+    );
+    if (yes == true) _reset();
+  }
+  // Problem solving checks the number instead (within 1%, units allowed: "12 V").
+  bool _ok(int i) => qs![i].type == 'solve'
+      ? numberOk(answers[i] ?? '', qs![i].answer)
+      : _norm(answers[i] ?? '') == _norm(qs![i].answer);
+  int get _right => [for (var i = 0; i < qs!.length; i++) if (_ok(i)) i].length;
+
+  // One question from rules.dart's item, or null if it's broken.
   Q? _question(Map m) {
-    final t = type == 'mix' ? '${m['type']}' : type;
-    if (!['mc', 'tf', 'fill', 'id'].contains(t) || m['q'] is! String || m['answer'] is! String) return null;
+    // The item's own type: rules.dart turns multiple choice into identification when a module has fewer
+    // than 4 terms, and fill in the blank into identification when the term isn't in its sentence.
+    final t = '${m['type'] ?? type}';
+    if (!['mc', 'tf', 'fill', 'id', 'solve'].contains(t) || m['q'] is! String || m['answer'] is! String) return null;
     final q = Q(t, m['q'], t == 'tf' ? _cap(m['answer']) : m['answer'], '${m['why'] ?? ''}', '${m['hint'] ?? ''}',
+        topic: ['mc', 'fill', 'id'].contains(t) ? '${m['answer']}' : '${m['topic'] ?? ''}',
         choices: [for (final c in (m['choices'] as List? ?? [])) '$c'],
         wrong: {
           for (final e in ((m['wrong'] as Map?) ?? {}).entries) (t == 'tf' ? _cap('${e.key}') : '${e.key}'): '${e.value}'
@@ -111,130 +236,156 @@ class _QuizState extends State<Quiz> {
     final meanings = pairs.values.toList()..shuffle();
     return [
       for (final p in pairs.entries)
-        Q('match', p.key, p.value, '${p.key}: ${p.value}', '', choices: meanings, wrong: {
+        Q('match', p.key, p.value, '${p.key}: ${p.value}', '', topic: p.key, choices: meanings, wrong: {
           for (final o in pairs.entries)
             if (o.key != p.key) o.value: '${store.t('meaning_of')} ${o.key}.'
         }),
     ];
   }
 
-  // Asks the AI for [k] questions about one part of the module.
-  Future<List<Q>> _batch(String part, int k) async {
-    final task = type == 'match'
-        ? 'Pick $k different key terms from the lesson. Return a JSON array of objects: '
-            '{"term": the term, "meaning": its meaning in one short sentence}'
-        : 'Write $k ${_kinds[type]}. Return a JSON array. Each item: {'
-            '${type == 'mix' ? '"type": "mc", "tf", "fill" or "id", ' : ''}'
-            '"q": the question (for fill in the blank, put ____ where the answer goes), '
-            '"choices": 4 options (multiple choice only), '
-            '"answer": the correct choice copied exactly for multiple choice, "True" or "False" for true or false, '
-            'otherwise the word or short phrase, '
-            '"why": one sentence explaining the correct answer, '
-            '"hint": a clue that does not give the answer away, '
-            '"wrong": {each wrong option: one sentence explaining what that option actually is} '
-            '(multiple choice and true or false only)}';
-    final reply = await ask([
-      {
-        'role': 'system',
-        'content': 'You write quiz questions for a student reviewing a school module. '
-            'Use only facts from the module. Ask only about the lesson itself: concepts, facts, definitions, '
-            'processes and examples. Never ask about course or class details such as course codes, course titles, '
-            'semesters, school years, schedules, units, instructors, grading or requirements. Reply with JSON only.',
-      },
-      {
-        'role': 'user',
-        'content': 'Module:\n"""\n$part\n"""\n\n$langRule\n$task',
-      },
-    ]);
-    final items = [for (final m in _json(reply, '[', ']') as List) if (m is Map) m];
-    return type == 'match' ? _matching(items) : [for (final m in items) ?_question(m)];
-  }
-
-  // Big quizzes are made in parts of up to 20 questions, each from a different section of the module,
-  // all at the same time. If some parts fail, the quiz uses the parts that worked.
-  Future<void> _start((Map, Map) sm) async {
+  // Gamy builds the quiz himself from the whole module (rules.dart), instantly.
+  void _start(Map folder, List<Map> modules) {
+    final t = store.t;
     // Free plan: not enough quiz items left this week -> show the Pro frame instead.
     if (count > store.itemsLeft) {
-      final t = store.t, date = store.refreshText;
-      return showPro(context,
+      final date = store.refreshText;
+      showPro(context,
           '${t('pro_items').replaceFirst('{left}', '${store.itemsLeft}')} ${date.isEmpty ? '' : t('refreshes').replaceFirst('{date}', date)}');
+      return;
     }
-    setState(() => busy = true);
-    store.setMood(1, 'think');
-    final text = sm.$2['text'] as String;
-    final n = (count / 20).ceil(), size = (text.length / n).ceil();
-    Object? err;
     try {
-      final parts = await Future.wait([
-        for (var b = 0; b < n; b++)
-          _batch(
-            text.substring(min(b * size, text.length), min(text.length, b * size + min(size, 10000))),
-            count ~/ n + (b < count % n ? 1 : 0),
-          ).catchError((Object e) {
-            err = e;
-            return <Q>[];
-          }),
-      ]);
-      final list = parts.expand((p) => p).toList();
-      if (list.isEmpty) throw err ?? 'bad_quiz';
+      final text = modules.map((m) => m['text'] as String).join('\n');
+      final items = type == 'solve' ? solveItems(text, count) : localItems(text, type, count);
+      final list = type == 'match' ? _matching(items) : [for (final m in items) ?_question(m)];
+      if (list.isEmpty) throw 'bad_quiz';
+      // Fewer good questions than asked for: say so instead of padding the quiz with junk.
+      if (list.length < count) {
+        ScaffoldMessenger.of(context)
+          ..hideCurrentSnackBar()
+          ..showSnackBar(SnackBar(content: Text(t('fewer').replaceFirst('{n}', '${list.length}'))));
+      }
       store.useItems(list.length); // counts toward the free weekly 70
       setState(() {
-        subject = sm.$1;
-        moduleName = sm.$2['name'];
+        subject = folder;
+        moduleName = modules.map((m) => m['name']).join(', ');
         qs = list;
+        _cards.clear();
+        _blank.clear();
         answers.clear();
         hints.clear();
-        fillWhy.clear();
+        explain.clear();
+        more.clear();
         done = review = false;
       });
-      store.setMood(1, 'idle');
+      _wait(); // Gamy starts timing (he teases after 45 seconds without answers)
     } catch (e) {
-      if (mounted) _error(e);
-      store.setMood(1, 'idle');
+      ScaffoldMessenger.of(context)
+        ..hideCurrentSnackBar() // a new message replaces the old one instead of waiting behind it
+        ..showSnackBar(
+          SnackBar(content: Text(t(e == 'no_facts' || e == 'no_formulas' ? '$e' : 'bad_quiz'))));
     }
-    if (mounted) setState(() => busy = false);
   }
 
-  Future<void> _submit() async {
-    // Typed answers have no preset explanations, so ask the AI about the wrong ones.
-    final wrongFill = [
-      for (var i = 0; i < qs!.length; i++)
-        if (['fill', 'id'].contains(qs![i].type) && !_ok(i) && (answers[i] ?? '').trim().isNotEmpty) i
-    ];
-    if (wrongFill.isNotEmpty) {
-      setState(() => busy = true);
-      try {
-        final reply = await ask([
-          {
-            'role': 'user',
-            'content': 'A student answered these quiz questions wrong. For each one, '
-                'explain in one sentence what the student\'s answer actually is or means. $langRule\n'
-                'Reply with only a JSON object mapping each number to the explanation.\n'
-                '${[for (final i in wrongFill) '$i. Question: ${qs![i].q} | Correct: ${qs![i].answer} | Student: ${answers[i]}'].join('\n')}',
-          },
-        ]);
-        (_json(reply, '{', '}') as Map).forEach((k, v) => fillWhy[int.tryParse('$k') ?? -1] = '$v');
-      } catch (_) {} // the review still works without these
-      busy = false;
+  void _submit() {
+    final t = store.t, n = qs!.length;
+    // Every question needs an answer first: say which ones are blank and scroll to the first.
+    final blank = [for (var i = 0; i < n; i++) if ((answers[i] ?? '').trim().isEmpty) i];
+    if (blank.isNotEmpty) {
+      ScaffoldMessenger.of(context)
+        ..hideCurrentSnackBar() // a new message replaces the old one instead of waiting behind it
+        ..showSnackBar(
+          SnackBar(content: Text(t('answer_all').replaceFirst('{n}', blank.map((i) => i + 1).join(', ')))));
+      setState(() => _blank
+        ..clear()
+        ..addAll(blank));
+      final card = _cards[blank.first]?.currentContext;
+      if (card != null) Scrollable.ensureVisible(card, duration: const Duration(milliseconds: 300), alignment: 0.1);
+      return;
     }
-    final r = _right, n = qs!.length;
-    store.addScore(subject!, {
-      'module': moduleName,
-      'type': type,
-      'right': r,
-      'total': n,
-      'date': DateTime.now().toIso8601String().substring(0, 10),
-    });
-    final band = r == n ? 0 : r / n >= .7 ? 1 : r / n >= .4 ? 2 : 3;
-    store.setMood(1, const ['smug', 'happy', 'surprised', 'sad'][band]);
-    final lines = _roasts[store.lang]![band];
+    _stopTeasing();
+    final r = _right;
+    try {
+      store.addScore(subject!, {
+        'module': moduleName,
+        'type': type,
+        'right': r,
+        'total': n,
+        'date': DateTime.now().toIso8601String().substring(0, 10),
+      });
+    } catch (e) {
+      // The score still shows; only the history misses it.
+      debugPrint('Score not saved: $e');
+      ScaffoldMessenger.of(context)
+        ..hideCurrentSnackBar() // a new message replaces the old one instead of waiting behind it
+        ..showSnackBar(SnackBar(content: Text(t('score_not_saved'))));
+    }
+    final band = r / n >= .8 ? 0 : r / n >= .5 ? 1 : 2; // high, middle, low
+    // Blunt or sarcastic, not just sad: smug when he's (grudgingly) impressed or judging you,
+    // playful when he's teasing, surprised at a middle score, and sad only now and then.
+    const poses = [
+      ['smug', 'playful'],
+      ['surprised', 'playful'],
+      ['smug', 'playful', 'smug', 'playful', 'sad'],
+    ];
+    final options = poses[band], now = DateTime.now().microsecond;
+    store.setMood(1, r == n ? 'smug' : options[now % options.length]);
+    final lines = roasts[store.lang]![band];
     setState(() {
       done = true;
-      roast = lines[DateTime.now().millisecond % lines.length];
+      roast = lines[nextLine('${store.lang}$band', lines.length)]; // all lines once before any repeats
     });
+    // The score card starts at the top of the page (the student may have scrolled to the last question).
+    WidgetsBinding.instance.addPostFrameCallback((_) {
+      if (_scroll.hasClients) _scroll.jumpTo(0);
+    });
+    _explainWrong();
+    _lookUp();
+  }
+
+  // For each wrong answer, a short "More about..." from Wikipedia, after the module's own explanation.
+  // Tried with the subject's name first ("Latches Cpe"), so the page fits the lesson better.
+  Future<void> _lookUp() async {
+    final quiz = qs!, subjectName = '${subject?['name'] ?? ''}';
+    for (var i = 0; i < quiz.length; i++) {
+      final q = quiz[i];
+      if (_ok(i) || q.topic.isEmpty) continue;
+      final page = await wiki('${q.topic} $subjectName', sentences: 2) ?? await wiki(q.topic, sentences: 2);
+      if (!mounted || qs != quiz) return; // the student left this quiz
+      if (page == null) continue;
+      setState(() => more[i] = page);
+    }
+  }
+
+  // With the brain on, Gamy explains each wrong typed answer (fill in the blank, identification) in his
+  // own words, from the module's sentence. One at a time, in the background, while the student reads the score.
+  Future<void> _explainWrong() async {
+    final quiz = qs!;
+    for (var i = 0; i < quiz.length; i++) {
+      final q = quiz[i], a = (answers[i] ?? '').trim();
+      if (!brain.ready || !['fill', 'id'].contains(q.type) || a.isEmpty || _ok(i)) continue;
+      var text = '';
+      try {
+        // The joke comes from Gamy's curated lines; the brain only explains, plainly (small models joke badly).
+        final low = roasts[store.lang]![2], jab = low[DateTime.now().microsecond % low.length]; // const list: no shuffle
+        await for (final w in brain.say(
+          'You explain quiz mistakes in one short, plain sentence, using only the module line given.'
+              '${store.lang == 'fil' ? ' Reply in Filipino.' : ''}',
+          'Module line: ${q.why}\nCorrect answer: ${q.answer}\nStudent answered: $a\n'
+              'In one sentence, say why "$a" is wrong.',
+          maxTokens: 60,
+        )) {
+          if (!mounted || qs != quiz) return; // the student left this quiz
+          text += w;
+          setState(() => explain[i] = '$jab ${cleanReply(text)}');
+        }
+      } catch (_) {
+        return; // the review still works without these
+      }
+    }
   }
 
   void _reset() {
+    _stopTeasing();
     setState(() => qs = null);
     store.setMood(1, 'idle');
   }
@@ -245,34 +396,56 @@ class _QuizState extends State<Quiz> {
   Widget build(BuildContext context) {
     final t = store.t;
     if (qs == null) return _setup(t);
-    return ListView(padding: const EdgeInsets.all(16), children: [
-      if (done) ...[
-        // On phones Gamy is hidden during the quiz, so he shows up here for the result.
-        // Result: Gamy stands in the middle with his comment right above his head.
-        Center(child: ConstrainedBox(constraints: const BoxConstraints(maxWidth: 420, maxHeight: 200), child: Bubble(roast))),
-        Center(child: GamySprite(store.moods[1], size: MediaQuery.sizeOf(context).width < 700 ? 140 : 200)),
-        Text('${t('score')}: $_right / ${qs!.length}',
-            textAlign: TextAlign.center, style: Theme.of(context).textTheme.headlineMedium),
-        const SizedBox(height: 8),
-        Wrap(alignment: WrapAlignment.center, spacing: 8, children: [
-          if (!review) FilledButton(onPressed: () => setState(() => review = true), child: Text(t('review'))),
-          OutlinedButton(onPressed: _reset, child: Text(t('new_quiz'))),
-        ]),
-        const SizedBox(height: 8),
-        Text(t('mistakes'), textAlign: TextAlign.center, style: Theme.of(context).textTheme.bodySmall),
-        const SizedBox(height: 16),
-      ],
+    // A Column (not a ListView) so every question is built, and "scroll to the first blank one" can find it.
+    return SingleChildScrollView(
+        controller: _scroll,
+        padding: const EdgeInsets.all(16),
+        child: Column(crossAxisAlignment: CrossAxisAlignment.stretch, children: [
+      if (!done)
+        Align(
+          alignment: Alignment.centerRight,
+          child: TextButton.icon(onPressed: _quit, icon: const Icon(Icons.close), label: Text(t('quit_quiz'))),
+        ),
+      if (done)
+        // The result fills the screen with everything centered (Gamy, his comment, the score and the buttons);
+        // the answer sheet is below it when the student scrolls down.
+        ConstrainedBox(
+          constraints: BoxConstraints(minHeight: (MediaQuery.sizeOf(context).height - 200).clamp(0, 700)),
+          child: Center(
+            child: ConstrainedBox(
+              constraints: const BoxConstraints(maxWidth: 520),
+              child: Column(mainAxisSize: MainAxisSize.min, children: [
+                // On phones Gamy is hidden during the quiz, so he shows up here: his comment right above his head.
+                ConstrainedBox(constraints: const BoxConstraints(maxWidth: 420, maxHeight: 200), child: Bubble(roast)),
+                GamySprite(store.moods[1], size: MediaQuery.sizeOf(context).width < 700 ? 140 : 200),
+                Text('${t('score')}: $_right / ${qs!.length}',
+                    textAlign: TextAlign.center, style: Theme.of(context).textTheme.headlineMedium),
+                const SizedBox(height: 8),
+                Wrap(alignment: WrapAlignment.center, spacing: 8, runSpacing: 8, children: [
+                  if (!review) FilledButton(onPressed: () => setState(() => review = true), child: Text(t('review'))),
+                  OutlinedButton.icon(
+                      onPressed: _reset, icon: const Icon(Icons.arrow_back), label: Text(t('new_quiz'))),
+                ]),
+                const SizedBox(height: 8),
+                Text(t('mistakes'), textAlign: TextAlign.center, style: Theme.of(context).textTheme.bodySmall),
+                const SizedBox(height: 16),
+              ]),
+            ),
+          ),
+        ),
       if (!done || review)
         for (var i = 0; i < qs!.length; i++) _card(i, t),
-      if (!done) FilledButton(onPressed: busy ? null : _submit, child: Text(t('submit'))),
-    ]);
+      if (!done) FilledButton(onPressed: _submit, child: Text(t('submit'))),
+    ]));
   }
 
   Widget _card(int i, String Function(String) t) {
     final q = qs![i], a = answers[i], ok = _ok(i);
-    final color = !review ? null : (ok ? Colors.green : Colors.red);
-    final wrongWhy = q.wrong[a] ?? fillWhy[i];
+    final missing = !done && _blank.contains(i); // left blank when "Check" was pressed
+    final color = missing ? Colors.red : (!review ? null : (ok ? Colors.green : Colors.red));
+    final wrongWhy = q.wrong[a] ?? explain[i];
     return Card(
+      key: _cards.putIfAbsent(i, GlobalKey.new),
       shape: color == null
           ? null
           : RoundedRectangleBorder(side: BorderSide(color: color, width: 3), borderRadius: BorderRadius.circular(16)),
@@ -280,6 +453,7 @@ class _QuizState extends State<Quiz> {
         padding: const EdgeInsets.all(12),
         child: Column(crossAxisAlignment: CrossAxisAlignment.start, children: [
           Text('${i + 1}. ${q.q}', style: const TextStyle(fontWeight: FontWeight.bold)),
+          if (missing) Text(t('no_answer_yet'), style: TextStyle(color: Colors.red.shade700)),
           const SizedBox(height: 8),
           if (q.type == 'mc' || q.type == 'tf')
             Wrap(spacing: 8, runSpacing: 8, children: [
@@ -290,7 +464,7 @@ class _QuizState extends State<Quiz> {
                   ChoiceChip(
                     label: Text(_show(q, c)),
                     selected: a == c,
-                    onSelected: (_) => setState(() => answers[i] = c),
+                    onSelected: (_) => _answered(i, c),
                   ),
             ])
           else if (done)
@@ -302,21 +476,45 @@ class _QuizState extends State<Quiz> {
               hint: Text(t('pick_meaning')),
               value: a,
               items: [for (final c in q.choices) DropdownMenuItem(value: c, child: Text(c))],
-              onChanged: (v) => setState(() => answers[i] = v!),
+              onChanged: (v) => _answered(i, v!),
             )
           else
-            TextField(onChanged: (v) => answers[i] = v),
+            TextField(
+              keyboardType: q.type == 'solve' ? const TextInputType.numberWithOptions(decimal: true, signed: true) : null,
+              onChanged: (v) {
+                answers[i] = v; // no rebuild while typing
+                if (_blank.contains(i) && v.trim().isNotEmpty) setState(() => _blank.remove(i));
+                _wait();
+              },
+            ),
           if (!done && !hints.contains(i) && q.hint.isNotEmpty)
             TextButton(onPressed: () => setState(() => hints.add(i)), child: Text(t('hint'))),
           if (!done && hints.contains(i)) Padding(padding: const EdgeInsets.only(top: 8), child: Text('💡 ${q.hint}')),
-          if (review && !ok) ...[
+          // Problem solving always shows its full solution in the review, right or wrong.
+          if (review && (!ok || q.type == 'solve')) ...[
             const Divider(),
-            Text('${t('correct')}: ${_show(q, q.answer)}',
-                style: TextStyle(color: Colors.green.shade800, fontWeight: FontWeight.bold)),
-            Text(q.why),
+            if (!ok)
+              Text('${t('correct')}: ${_show(q, q.answer)}',
+                  style: TextStyle(color: Colors.green.shade800, fontWeight: FontWeight.bold)),
+            if (q.type == 'solve')
+              // Even-width font so the step table's columns line up; it scrolls sideways on phones.
+              SingleChildScrollView(
+                scrollDirection: Axis.horizontal,
+                child: Text(q.why,
+                    style: const TextStyle(
+                        fontFamily: 'monospace', fontFamilyFallback: ['Consolas', 'Courier New'], fontSize: 12, height: 1.4)),
+              )
+            else
+              Text(q.why),
             if (wrongWhy != null && a != null) ...[
               const SizedBox(height: 6),
               Text('${t('your_answer')} (${_show(q, a)}): $wrongWhy', style: TextStyle(color: Colors.red.shade800)),
+            ],
+            if (more[i] != null) ...[
+              const SizedBox(height: 6),
+              Text(t('more_about').replaceFirst('{term}', more[i]!.title),
+                  style: const TextStyle(fontWeight: FontWeight.bold, fontSize: 12)),
+              Text(cleanReply(more[i]!.text), style: const TextStyle(fontSize: 12)),
             ],
           ],
           if (review && reportForm.isNotEmpty)
@@ -347,41 +545,62 @@ class _QuizState extends State<Quiz> {
       );
 
   Widget _setup(String Function(String) t) {
-    final mods = _mods;
-    if (mods.isEmpty) {
+    final folders = _folders;
+    if (folders.isEmpty) {
       return Center(child: Padding(padding: const EdgeInsets.all(24), child: Text(t('need_module'), textAlign: TextAlign.center)));
     }
-    if (pick != null && pick! >= mods.length) pick = null;
-    final Iterable scores = pick == null ? const [] : (mods[pick!].$1['scores'] as List).reversed.take(5);
+    if (pick != null && pick! >= folders.length) pick = null;
+    final folder = pick == null ? null : folders[pick!];
+    final mods = folder == null ? const <Map>[] : [for (final m in folder['modules']) m as Map];
+    chosen.retainWhere(mods.contains); // forget modules that were deleted
+    final picked = [for (final m in mods) if (chosen.contains(m)) m];
+    final tooLong = picked.fold<int>(0, (n, m) => n + (m['text'] as String).length) > maxQuizChars;
+    final Iterable scores = folder == null ? const [] : (folder['scores'] as List).reversed.take(5);
     return ListView(padding: const EdgeInsets.all(16), children: [
-      Text(t('pick_module')),
+      // First the subject (folder), then which of its modules
+      Text(t('pick_subject')),
       DropdownButton<int>(
         isExpanded: true,
         value: pick,
         items: [
-          for (var i = 0; i < mods.length; i++)
-            DropdownMenuItem(value: i, child: Text('${mods[i].$1['name']} • ${mods[i].$2['name']}', overflow: TextOverflow.ellipsis)),
+          for (var i = 0; i < folders.length; i++)
+            DropdownMenuItem(value: i, child: Text('${folders[i]['name']}', overflow: TextOverflow.ellipsis)),
         ],
-        onChanged: busy ? null : (v) => setState(() => pick = v),
+        onChanged: (v) => setState(() {
+          pick = v;
+          chosen.clear();
+        }),
       ),
+      if (folder != null) ...[
+        const SizedBox(height: 12),
+        Text(t('pick_modules')),
+        const SizedBox(height: 8),
+        Wrap(spacing: 8, runSpacing: 8, children: [
+          for (final m in mods)
+            FilterChip(
+              label: Text('${m['name']}'),
+              selected: chosen.contains(m),
+              onSelected: (on) => setState(() => on ? chosen.add(m) : chosen.remove(m)),
+            ),
+        ]),
+        if (tooLong) Padding(padding: const EdgeInsets.only(top: 8), child: Text(t('too_long'), style: const TextStyle(color: Colors.red))),
+      ],
       const SizedBox(height: 16),
       Text(t('pick_type')),
       const SizedBox(height: 8),
       Wrap(spacing: 8, runSpacing: 8, children: [
-        for (final k in ['mc', 'tf', 'fill', 'id', 'match', 'mix'])
+        for (final k in ['mc', 'tf', 'fill', 'id', 'match', 'mix', 'solve'])
           ChoiceChip(
             avatar: !store.pro && _proTypes.contains(k) ? const Icon(Icons.lock, size: 16) : null,
             label: Text(t(k)),
             selected: type == k,
-            onSelected: busy
-                ? null
-                : (_) {
-                    if (!store.pro && _proTypes.contains(k)) {
-                      showPro(context, t('pro_types')); // locked type -> Pro frame
-                    } else {
-                      setState(() => type = k);
-                    }
-                  },
+            onSelected: (_) {
+              if (!store.pro && _proTypes.contains(k)) {
+                showPro(context, t('pro_types')); // locked type -> Pro frame
+              } else {
+                setState(() => type = k);
+              }
+            },
           ),
       ]),
       const SizedBox(height: 16),
@@ -389,12 +608,11 @@ class _QuizState extends State<Quiz> {
       const SizedBox(height: 8),
       Wrap(spacing: 8, runSpacing: 8, crossAxisAlignment: WrapCrossAlignment.center, children: [
         for (final n in [10, 15, 20, 25])
-          ChoiceChip(label: Text('$n'), selected: count == n, onSelected: busy ? null : (_) => setState(() => count = n)),
+          ChoiceChip(label: Text('$n'), selected: count == n, onSelected: (_) => setState(() => count = n)),
         // Or type any number; anything above 100 counts as 100.
         SizedBox(
           width: 110,
           child: TextField(
-            enabled: !busy,
             keyboardType: TextInputType.number,
             inputFormatters: [FilteringTextInputFormatter.digitsOnly, LengthLimitingTextInputFormatter(3)],
             decoration: InputDecoration(hintText: t('other_count'), isDense: true),
@@ -411,10 +629,8 @@ class _QuizState extends State<Quiz> {
           '${store.refreshText.isEmpty ? '' : t('refreshes').replaceFirst('{date}', store.refreshText)}',
           style: Theme.of(context).textTheme.bodySmall,
         ),
-      if (count > 20) Text(t('big_quiz').replaceFirst('{n}', '${(count / 20).ceil()}'), style: Theme.of(context).textTheme.bodySmall),
       const SizedBox(height: 16),
-      if (busy) Text(t('making'), textAlign: TextAlign.center),
-      FilledButton(onPressed: pick == null || busy ? null : () => _start(mods[pick!]), child: Text(t('start'))),
+      FilledButton(onPressed: picked.isEmpty || tooLong ? null : () => _start(folder!, picked), child: Text(t('start'))),
       if (scores.isNotEmpty) ...[
         const SizedBox(height: 24),
         Text(t('history'), style: const TextStyle(fontWeight: FontWeight.bold)),
