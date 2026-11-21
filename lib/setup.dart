@@ -40,7 +40,10 @@ class _SetupState extends State<Setup> {
         body: Center(
           child: ConstrainedBox(
             constraints: const BoxConstraints(maxWidth: 480),
-            child: ListView(shrinkWrap: true, padding: const EdgeInsets.all(24), children: [
+            // Everything is drawn (not a lazy list), so "Skip for now" is there even on short windows.
+            child: SingleChildScrollView(
+              padding: const EdgeInsets.all(24),
+              child: Column(crossAxisAlignment: CrossAxisAlignment.stretch, mainAxisSize: MainAxisSize.min, children: [
               Image.asset('assets/gamy/smug.png', height: 140),
               Text(t('keep_safe'), textAlign: TextAlign.center, style: text.headlineSmall),
               const SizedBox(height: 12),
@@ -57,7 +60,7 @@ class _SetupState extends State<Setup> {
               const SizedBox(height: 8),
               Text(t('skip_note'), textAlign: TextAlign.center, style: text.bodySmall),
               Align(child: language),
-            ]),
+            ])),
           ),
         ),
       );

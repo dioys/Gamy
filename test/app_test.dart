@@ -449,7 +449,7 @@ void main() {
       store.agree();
       await tester.pumpWidget(const GamyApp());
       await tester.pump();
-      expect(find.text(t('hello')), findsWidgets);
+      expect(find.textContaining(t('hello')), findsWidgets); // his greeting, then a quote
 
       await tester.tap(find.text(t('quiz')));
       await tester.pump();

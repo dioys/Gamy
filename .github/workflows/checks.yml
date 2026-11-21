@@ -1,0 +1,44 @@
+# Runs Gamy's checks on GitHub after every push to main (and from the Actions tab: "Run workflow").
+# If something fails, GitHub emails you and the commit gets a red X.
+# Private repo: free minutes each month. Windows minutes count double, so this only runs on main.
+name: Checks
+
+on:
+  push:
+    branches: [main]
+  workflow_dispatch:
+
+permissions:
+  contents: read
+
+jobs:
+  app:
+    name: Analyze and app tests (Windows)
+    runs-on: windows-latest
+    timeout-minutes: 40
+    steps:
+      - uses: actions/checkout@v4
+      - uses: subosito/flutter-action@v2
+        with:
+          channel: stable
+          cache: true
+      - run: flutter pub get
+      - run: flutter analyze
+      - run: flutter test
+
+  rules:
+    name: Firebase security-rules attack tests
+    runs-on: ubuntu-latest
+    timeout-minutes: 15
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-java@v4
+        with:
+          distribution: temurin
+          java-version: '21'
+      - uses: actions/setup-node@v4
+        with:
+          node-version: '22'
+      - run: npm ci
+        working-directory: firestore
+      - run: npx --yes firebase-tools emulators:exec --only firestore --project gamy-dev "node --test firestore/rules.test.mjs"
