@@ -66,33 +66,6 @@ Future<void> talk(int tab, String text) async {
   if (store.moods[tab] == 'talk') store.setMood(tab, 'idle');
 }
 
-// While the student answers, Gamy shares a quote or sings one of his own study jingles.
-// (Real song lyrics are copyrighted, so he only sings his own.)
-// Famous lines and proverbs (some with Gamy's twist): one shows under his greeting when Chat opens.
-const quotes = [
-  '"Knowledge is power."\n- Francis Bacon',
-  '"Genius is one percent inspiration and ninety-nine percent perspiration."\n- Thomas Edison',
-  '"The important thing is not to stop questioning."\n- Albert Einstein',
-  '"I have no special talents. I am only passionately curious."\n- Albert Einstein',
-  '"Education is the most powerful weapon which you can use to change the world."\n- Nelson Mandela',
-  '"Study hard what interests you the most in the most undisciplined, irreverent and original manner possible."\n- Richard Feynman',
-  '"Kapag may tiyaga, may nilaga."\n- Filipino proverb',
-  '"Ang hindi lumingon sa pinanggalingan ay hindi makararating sa paroroonan."\n- Filipino proverb',
-  // Proverbs with Gamy's twist
-  '"Kapag may tiyaga, may nilaga. Kapag walang review, may bagsak."\n- Gamy\'s version',
-  '"Nasa Diyos ang awa, nasa tao ang gawa. Nasa\'yo ang pag-review."\n- Gamy\'s version',
-  '"Ang hindi lumingon sa module ay hindi makakapasa sa exam."\n- Gamy\'s version',
-  '"Habang maikli ang kumot, matutong mag-review nang maaga."\n- Gamy\'s version',
-  '"Walang mahirap na quiz sa taong matiyagang mag-aral."\n- Gamy\'s version',
-  '"Ang tamang sagot ay parang jowa: hinahanap, hindi hinuhulaan."\n- Gamy',
-  '"Pag may isinuksok, may madudukot. Pag may ni-review, may maisasagot."\n- Gamy\'s version',
-  '"Ang lumalakad nang matulin, kung matinik ay malalim. Basahin mo muna ang tanong."\n- Gamy\'s version',
-  '♪ Read it once, then read it twice, getting answers right feels nice ♪\n- Gamy',
-  '♪ Don\'t you panic, don\'t you cry, read the question, then reply ♪\n- Gamy',
-  '♪ Eyes on the quiz, not on me, I\'m just a bear, as you can see ♪\n- Gamy',
-  '♪ Tick, tock, take your time, wrong answers are a bigger crime ♪\n- Gamy',
-];
-
 // A comic-style speech bubble: white, thick outline, with a tail pointing down at Gamy.
 class Bubble extends StatelessWidget {
   const Bubble(this.text, {super.key});

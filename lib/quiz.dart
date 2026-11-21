@@ -131,7 +131,6 @@ class Quiz extends StatefulWidget {
 }
 
 // Most text one quiz may use (about 100 pages). More would take too long to read and make into questions.
-const maxQuizChars = 200000;
 
 class _QuizState extends State<Quiz> {
   int? pick; // which subject (folder)
@@ -150,6 +149,7 @@ class _QuizState extends State<Quiz> {
   final _blank = <int>{}; // questions left blank when "Check" was pressed: highlighted until answered
   Timer? _idle; // Gamy teases after 45 seconds without any answer
   bool done = false, review = false;
+  bool making = false; // the quiz is being made (long modules take a while)
   String roast = '';
 
   List<Map> get _folders => [for (final s in store.subjects) if ((s['modules'] as List).isNotEmpty) s];
@@ -244,7 +244,7 @@ class _QuizState extends State<Quiz> {
   }
 
   // Gamy builds the quiz himself from the whole module (rules.dart), instantly.
-  void _start(Map folder, List<Map> modules) {
+  Future<void> _start(Map folder, List<Map> modules) async {
     final t = store.t;
     // Free plan: not enough quiz items left this week -> show the Pro frame instead.
     if (count > store.itemsLeft) {
@@ -253,6 +253,10 @@ class _QuizState extends State<Quiz> {
           '${t('pro_items').replaceFirst('{left}', '${store.itemsLeft}')} ${date.isEmpty ? '' : t('refreshes').replaceFirst('{date}', date)}');
       return;
     }
+    // Show "Making your quiz..." first, so long modules don't look frozen.
+    setState(() => making = true);
+    await Future.delayed(const Duration(milliseconds: 50));
+    if (!mounted) return;
     try {
       final text = modules.map((m) => m['text'] as String).join('\n');
       final items = type == 'solve' ? solveItems(text, count) : localItems(text, type, count);
@@ -283,6 +287,8 @@ class _QuizState extends State<Quiz> {
         ..hideCurrentSnackBar() // a new message replaces the old one instead of waiting behind it
         ..showSnackBar(
           SnackBar(content: Text(t(e == 'no_facts' || e == 'no_formulas' ? '$e' : 'bad_quiz'))));
+    } finally {
+      if (mounted) setState(() => making = false);
     }
   }
 
@@ -395,6 +401,15 @@ class _QuizState extends State<Quiz> {
   @override
   Widget build(BuildContext context) {
     final t = store.t;
+    if (making) {
+      return Center(
+        child: Column(mainAxisSize: MainAxisSize.min, children: [
+          const CircularProgressIndicator(),
+          const SizedBox(height: 12),
+          Text(t('making_quiz')),
+        ]),
+      );
+    }
     if (qs == null) return _setup(t);
     // A Column (not a ListView) so every question is built, and "scroll to the first blank one" can find it.
     return SingleChildScrollView(
@@ -554,7 +569,6 @@ class _QuizState extends State<Quiz> {
     final mods = folder == null ? const <Map>[] : [for (final m in folder['modules']) m as Map];
     chosen.retainWhere(mods.contains); // forget modules that were deleted
     final picked = [for (final m in mods) if (chosen.contains(m)) m];
-    final tooLong = picked.fold<int>(0, (n, m) => n + (m['text'] as String).length) > maxQuizChars;
     final Iterable scores = folder == null ? const [] : (folder['scores'] as List).reversed.take(5);
     return ListView(padding: const EdgeInsets.all(16), children: [
       // First the subject (folder), then which of its modules
@@ -583,7 +597,6 @@ class _QuizState extends State<Quiz> {
               onSelected: (on) => setState(() => on ? chosen.add(m) : chosen.remove(m)),
             ),
         ]),
-        if (tooLong) Padding(padding: const EdgeInsets.only(top: 8), child: Text(t('too_long'), style: const TextStyle(color: Colors.red))),
       ],
       const SizedBox(height: 16),
       Text(t('pick_type')),
@@ -630,7 +643,7 @@ class _QuizState extends State<Quiz> {
           style: Theme.of(context).textTheme.bodySmall,
         ),
       const SizedBox(height: 16),
-      FilledButton(onPressed: picked.isEmpty || tooLong ? null : () => _start(folder!, picked), child: Text(t('start'))),
+      FilledButton(onPressed: picked.isEmpty ? null : () => _start(folder!, picked), child: Text(t('start'))),
       if (scores.isNotEmpty) ...[
         const SizedBox(height: 24),
         Text(t('history'), style: const TextStyle(fontWeight: FontWeight.bold)),

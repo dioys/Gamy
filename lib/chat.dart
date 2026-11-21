@@ -24,7 +24,7 @@ class _ChatState extends State<Chat> {
   @override
   void initState() {
     super.initState();
-    msgs.add((true, '${store.t('hello')}\n\n${quotes[Random().nextInt(quotes.length)]}'));
+    msgs.add((true, store.t('hello')));
     _poke();
   }
 

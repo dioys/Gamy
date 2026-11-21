@@ -14,6 +14,14 @@
       },
       "oauth_client": [
         {
+          "client_id": "366280076823-chm2aiu40j9lh6qghqd6hdkb0je2ntve.apps.googleusercontent.com",
+          "client_type": 1,
+          "android_info": {
+            "package_name": "com.buddybear.gamy",
+            "certificate_hash": "498deb90c895b065a8ba47c61d6606ed7add35d7"
+          }
+        },
+        {
           "client_id": "366280076823-f2vppqneofh850nhedkjioluo86lqbj7.apps.googleusercontent.com",
           "client_type": 3
         }

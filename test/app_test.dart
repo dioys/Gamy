@@ -403,14 +403,18 @@ void main() {
       await tester.pumpWidget(const SizedBox());
     });
 
-    testWidgets('modules that are too long show a notice and cannot start', (tester) async {
+    testWidgets('long modules are never blocked: the quiz still starts', (tester) async {
       await openQuiz(tester, [
-        {'name': 'Huge', 'text': 'a' * (maxQuizChars + 1)},
+        {'name': 'Huge', 'text': '$sample\n${'Extra filler line without a definition here.\n' * 6000}'},
       ]);
       await tester.tap(find.widgetWithText(FilterChip, 'Huge'));
       await tester.pump();
-      expect(find.text(t('too_long')), findsOneWidget);
-      expect(tester.widget<FilledButton>(find.widgetWithText(FilledButton, t('start'))).onPressed, isNull);
+      final start = find.widgetWithText(FilledButton, t('start'));
+      expect(tester.widget<FilledButton>(start).onPressed, isNotNull, reason: 'never blocked');
+      await tester.ensureVisible(start);
+      await tester.tap(start);
+      await tester.pumpAndSettle();
+      expect(find.textContaining(RegExp(r'^\d+\. ')), findsWidgets, reason: 'the quiz was made');
       await tester.pumpWidget(const SizedBox());
     });
   });

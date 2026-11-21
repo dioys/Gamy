@@ -138,7 +138,7 @@ class Settings extends StatelessWidget {
                 leading: const Icon(Icons.workspace_premium),
                 title: Text(store.pro ? 'Gamy Pro' : t('free_plan')),
                 subtitle: store.pro
-                    ? null
+                    ? Text(t('pro_active')) // what Pro includes, so it's clear even while it's on
                     : Text('${t('uploads_left').replaceFirst('{used}', '${store.uploads}')}\n'
                         '${t('items_left').replaceFirst('{left}', '${store.itemsLeft}')}'),
                 onTap: store.pro ? null : () => showPro(context, t('pro_why')),
