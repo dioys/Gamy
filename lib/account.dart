@@ -70,7 +70,7 @@ class Account extends ChangeNotifier {
     notifyListeners();
     try {
       final token = await _token();
-      if (token == null) return null;
+      if (token == null) return 'sign_in_cancelled'; // closed, or Google stopped it (the reason is in the log)
       await FirebaseAuth.instance.signInWithCredential(GoogleAuthProvider.credential(idToken: token));
       if (!(await _me.get()).exists) await _me.set({'created': FieldValue.serverTimestamp()});
       await sync();
@@ -93,6 +93,8 @@ class Account extends ChangeNotifier {
     try {
       return (await g.authenticate()).authentication.idToken;
     } on GoogleSignInException catch (e) {
+      // Android reports setup problems (fingerprint, client ID) as "canceled" too: print the real reason.
+      debugPrint('Google sign-in stopped: ${e.code} ${e.description} ${e.details}');
       if (e.code == GoogleSignInExceptionCode.canceled) return null;
       rethrow;
     }

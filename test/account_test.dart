@@ -86,6 +86,11 @@ void main() {
   group('notices', () {
     testWidgets('Settings says lessons are device-only and offers Google sign-in', (tester) async {
       await tester.pumpWidget(const MaterialApp(home: Settings()));
+      // The row shows a short status; tapping it opens the details with the button.
+      expect(find.text(store.t('not_signed_in')), findsOneWidget);
+      expect(find.text(store.t('account_off')), findsNothing);
+      await tester.tap(find.text(store.t('account')));
+      await tester.pumpAndSettle();
       expect(find.text(store.t('account_off')), findsOneWidget);
       expect(find.text(store.t('sign_in')), findsOneWidget);
       expect(find.text(store.t('delete_account')), findsNothing, reason: 'only when signed in');

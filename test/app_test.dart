@@ -473,9 +473,13 @@ void main() {
       await tester.tap(find.byIcon(Icons.settings));
       await tester.pumpAndSettle();
       expect(find.byType(Settings), findsOneWidget);
-      expect(find.text(t('brain_note')), findsOneWidget, reason: 'brain not downloaded yet');
-      expect(find.text(t('search_note')), findsOneWidget, reason: 'smart search is its own optional row');
-      expect(find.text(t('brain_get')), findsNWidgets(2), reason: 'one Download for the brain, one for smart search');
+      // Short statuses in the rows; the details (and the Download button) open when a row is tapped.
+      expect(find.text(t('status_off')), findsNWidgets(2), reason: 'brain and smart search not downloaded yet');
+      expect(find.text(t('brain_note')), findsNothing);
+      await tester.tap(find.text(t('search_title')));
+      await tester.pumpAndSettle();
+      expect(find.text(t('search_note')), findsOneWidget);
+      expect(find.text(t('brain_get')), findsOneWidget);
       await close(tester);
     });
   });

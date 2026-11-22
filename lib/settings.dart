@@ -56,27 +56,79 @@ class Settings extends StatelessWidget {
     if (!await brain.download(search: search)) bar.showSnackBar(SnackBar(content: Text(store.t('brain_failed'))));
   }
 
+  // Tapping a row opens its details (like About Gamy): the full explanation and the buttons.
+  // The window updates by itself (download progress, signing in...).
+  void _details(BuildContext context, String title, Widget Function() body) => showDialog(
+        context: context,
+        builder: (ctx) => ListenableBuilder(
+          listenable: Listenable.merge([store, brain, account]),
+          builder: (ctx, _) => AlertDialog(
+            title: Text(title),
+            content: SingleChildScrollView(child: body()),
+            actions: [TextButton(onPressed: () => Navigator.pop(ctx), child: Text(store.t('close')))],
+          ),
+        ),
+      );
+
+  Widget _account(BuildContext context) {
+    final t = store.t, user = account.user;
+    return ListTile(
+      leading: const Icon(Icons.account_circle),
+      title: Text(t('account')),
+      subtitle: Text(user == null ? t('not_signed_in') : user.email ?? ''),
+      onTap: () => _details(context, t('account'), () {
+        final user = account.user;
+        return Column(crossAxisAlignment: CrossAxisAlignment.stretch, mainAxisSize: MainAxisSize.min, children: [
+          Text(user == null ? t('account_off') : t('account_on').replaceFirst('{email}', user.email ?? '')),
+          const SizedBox(height: 12),
+          if (account.busy)
+            const Center(child: CircularProgressIndicator())
+          else if (user == null)
+            FilledButton.icon(onPressed: () => _signIn(context), icon: const Icon(Icons.login), label: Text(t('sign_in')))
+          else ...[
+            OutlinedButton(onPressed: account.signOut, child: Text(t('sign_out'))),
+            const SizedBox(height: 8),
+            TextButton(
+              onPressed: () => _deleteAccount(context),
+              child: Text(t('delete_account'), style: const TextStyle(color: Colors.red)),
+            ),
+            Text(t('delete_account_note'), style: Theme.of(context).textTheme.bodySmall),
+          ],
+        ]);
+      }),
+    );
+  }
+
   // One row for the brain and one for smart search (an optional extra), each with its own download.
-  Widget _model(BuildContext context, {required bool search}) {
+  String _status(bool search) {
     final t = store.t, has = search ? brain.hasSearch : brain.has, ready = search ? brain.searchReady : brain.ready;
-    final mine = brain.progress != null && brain.searching == search; // this one is downloading
+    if (brain.progress != null && brain.searching == search) {
+      return '${t('brain_downloading')} ${(brain.progress! * 100).round()}%';
+    }
+    if (brain.loading && has && !ready) return t('brain_loading');
+    return ready ? t('status_on') : t(has ? 'brain_bad' : 'status_off');
+  }
+
+  Widget _model(BuildContext context, {required bool search}) {
+    final t = store.t, title = t(search ? 'search_title' : 'brain');
     return ListTile(
       leading: Icon(search ? Icons.travel_explore : Icons.psychology),
-      title: Text(t(search ? 'search_title' : 'brain')),
-      subtitle: Text(mine
-          ? '${t('brain_downloading')} ${(brain.progress! * 100).round()}%'
-          : brain.loading && has && !ready
-              ? t('brain_loading')
-              : ready
-                  ? t('brain_on')
-                  : t(has ? 'brain_bad' : (search ? 'search_note' : 'brain_note'))),
-      trailing: mine || (brain.loading && has && !ready)
-          ? null
-          : has
-              ? TextButton(onPressed: () => brain.remove(search: search), child: Text(t('brain_remove')))
-              : FilledButton(
-                  onPressed: brain.progress != null ? null : () => _download(context, search: search),
-                  child: Text(t('brain_get'))),
+      title: Text(title),
+      subtitle: Text(_status(search)),
+      onTap: () => _details(context, title, () {
+        final has = search ? brain.hasSearch : brain.has, busy = brain.progress != null;
+        return Column(crossAxisAlignment: CrossAxisAlignment.stretch, mainAxisSize: MainAxisSize.min, children: [
+          Text(t(search ? 'search_note' : 'brain_note')),
+          const SizedBox(height: 8),
+          Text(_status(search), style: const TextStyle(fontWeight: FontWeight.bold)),
+          const SizedBox(height: 12),
+          if (has)
+            OutlinedButton(onPressed: () => brain.remove(search: search), child: Text(t('brain_remove')))
+          else
+            FilledButton(
+                onPressed: busy ? null : () => _download(context, search: search), child: Text(t('brain_get'))),
+        ]);
+      }),
     );
   }
 
@@ -88,32 +140,8 @@ class Settings extends StatelessWidget {
           return Scaffold(
             appBar: AppBar(title: Text(t('settings'))),
             body: ListView(children: [
-              // Optional Google account: a copy of the lessons online, so they survive a reinstall or a new device
-              ListTile(
-                leading: const Icon(Icons.account_circle),
-                title: Text(t('account')),
-                // The button sits under the text (not at the right edge), so long Filipino labels fit small phones
-                subtitle: Column(crossAxisAlignment: CrossAxisAlignment.start, children: [
-                  Text(account.user == null
-                      ? t('account_off')
-                      : t('account_on').replaceFirst('{email}', account.user!.email ?? '')),
-                  const SizedBox(height: 8),
-                  if (account.busy)
-                    const CircularProgressIndicator()
-                  else if (account.user == null)
-                    FilledButton.icon(
-                        onPressed: () => _signIn(context), icon: const Icon(Icons.login), label: Text(t('sign_in')))
-                  else
-                    OutlinedButton(onPressed: account.signOut, child: Text(t('sign_out'))),
-                ]),
-              ),
-              if (account.user != null)
-                ListTile(
-                  leading: const Icon(Icons.no_accounts, color: Colors.red),
-                  title: Text(t('delete_account'), style: const TextStyle(color: Colors.red)),
-                  subtitle: Text(t('delete_account_note')),
-                  onTap: account.busy ? null : () => _deleteAccount(context),
-                ),
+              // Each row shows a short status; tapping it opens the details (like About Gamy)
+              _account(context),
               ListTile(
                 leading: const Icon(Icons.language),
                 title: Text(t('language')),
@@ -145,12 +173,13 @@ class Settings extends StatelessWidget {
               _model(context, search: true),
               ListTile(
                 leading: const Icon(Icons.workspace_premium),
-                title: Text(store.pro ? 'Gamy Pro' : t('free_plan')),
-                subtitle: store.pro
-                    ? Text(t('pro_active')) // what Pro includes, so it's clear even while it's on
-                    : Text('${t('uploads_left').replaceFirst('{used}', '${store.uploads}')}\n'
+                title: const Text('Gamy Pro'),
+                subtitle: Text(store.pro ? t('status_on') : t('free_plan')),
+                onTap: () => store.pro
+                    ? _details(context, 'Gamy Pro', () => Text(t('pro_active'))) // what Pro includes
+                    : showPro(context,
+                        '${t('uploads_left').replaceFirst('{used}', '${store.uploads}')}\n'
                         '${t('items_left').replaceFirst('{left}', '${store.itemsLeft}')}'),
-                onTap: store.pro ? null : () => showPro(context, t('pro_why')),
               ),
               // One row for the version, the Terms and the open-source licenses. The licenses must stay
               // reachable somewhere (llama.cpp, Firebase, SQLite... require the credit); Flutter's About
