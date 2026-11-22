@@ -159,15 +159,12 @@ void main() {
     await tester.pumpWidget(const SizedBox());
   });
 
-  testWidgets('no answers for 45 seconds: Gamy teases in a message bar', (tester) async {
+  testWidgets('no pop-up lines during the quiz, even after a long wait (dialogue is only in the score)',
+      (tester) async {
     await start(tester, _twelve, type: 'tf');
-    Finder tease() => find.byWidgetPredicate((w) => w is Text && (w.data ?? '').startsWith('🐻 '));
-    expect(tease(), findsNothing);
-    await tester.pump(const Duration(seconds: 46));
+    await tester.pump(const Duration(minutes: 2));
     await tester.pumpAndSettle();
-    expect(tease(), findsOneWidget);
-    final line = tester.widget<Text>(tease()).data!.substring(3);
-    expect(teases['en'], contains(line));
+    expect(find.byType(SnackBar), findsNothing);
     await tester.pumpWidget(const SizedBox());
   });
 
@@ -176,10 +173,6 @@ void main() {
     expect(seen, hasLength(17));
   });
 
-  test('Gamy has many different tease lines in both languages', () {
-    expect(teases['en'], hasLength(greaterThanOrEqualTo(20)));
-    expect(teases['fil'], hasLength(greaterThanOrEqualTo(20)));
-  });
 
   testWidgets('after reopening Gamy, a finished quiz still shows its score (the Nov 21 crash)', (tester) async {
     store.addSubject('Networks');

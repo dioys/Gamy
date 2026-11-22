@@ -131,6 +131,44 @@ void main() {
       }
     });
 
+    test('true or false reads like a normal sentence, not "X means: ..."', () {
+      for (final m in localItems(sample, 'tf', 100)) {
+        expect(m['q'], isNot(contains('means:')), reason: m['q']);
+        expect(m['q'], endsWith('.'));
+        expect(m['q'], matches(RegExp(r' (is|are|refers to|means) ')), reason: m['q']);
+      }
+      const colon = 'Resistor: a part that opposes the flow of electric current.\n'
+          'Watt: the measure of power used by electrical devices.\n'
+          'Volt: the measure of electric potential difference between points.\n';
+      for (final m in localItems(colon, 'tf', 10)) {
+        expect(m['q'], matches(RegExp(r'^(Resistor|Watt|Volt) is [a-z]')), reason: m['q']);
+      }
+    });
+
+    test('a mixed quiz is balanced: the 4 types take turns', () {
+      final big = [
+        for (final w in ['alpha', 'bravo', 'charlie', 'delta', 'echo', 'foxtrot', 'golf', 'hotel', 'india', 'juliet', 'kilo', 'lima'])
+          'A $w gizmo is a part of the system that handles the $w work for the computer.'
+      ].join('\n');
+      for (var run = 0; run < 5; run++) {
+        final types = [for (final m in localItems(big, 'mix', 12)) m['type']];
+        for (final k in ['mc', 'tf', 'fill', 'id']) {
+          expect(types.where((x) => x == k).length, 3, reason: '$k in $types');
+        }
+      }
+    });
+
+    test('questions come from the whole module, not just its first pages', () {
+      final lines = [
+        for (var i = 0; i < 100; i++)
+          'A ${String.fromCharCode(97 + i % 26)}${String.fromCharCode(97 + i ~/ 26)}x widget is a gadget that does job number ${'z' * (i % 7 + 1)} in the lab.'
+      ];
+      final where = {for (var i = 0; i < 100; i++) '${lines[i].split(' ')[1]} widget': i};
+      final picked = [for (final m in localItems(lines.join('\n'), 'id', 10)) where[(m['answer'] as String)]!];
+      expect(picked.any((i) => i >= 90), isTrue, reason: 'the last pages are used too: $picked');
+      expect(picked.any((i) => i < 10), isTrue, reason: 'and the first: $picked');
+    });
+
     test('fill in the blank: the term is blanked out of the sentence', () {
       for (final m in localItems(sample, 'fill', 100)) {
         expect(m['q'], contains('____'));

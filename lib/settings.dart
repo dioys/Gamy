@@ -51,9 +51,33 @@ class Settings extends StatelessWidget {
     if (err != null) bar.showSnackBar(SnackBar(content: Text(store.t(err))));
   }
 
-  Future<void> _download(BuildContext context) async {
+  Future<void> _download(BuildContext context, {bool search = false}) async {
     final bar = ScaffoldMessenger.of(context);
-    if (!await brain.download()) bar.showSnackBar(SnackBar(content: Text(store.t('brain_failed'))));
+    if (!await brain.download(search: search)) bar.showSnackBar(SnackBar(content: Text(store.t('brain_failed'))));
+  }
+
+  // One row for the brain and one for smart search (an optional extra), each with its own download.
+  Widget _model(BuildContext context, {required bool search}) {
+    final t = store.t, has = search ? brain.hasSearch : brain.has, ready = search ? brain.searchReady : brain.ready;
+    final mine = brain.progress != null && brain.searching == search; // this one is downloading
+    return ListTile(
+      leading: Icon(search ? Icons.travel_explore : Icons.psychology),
+      title: Text(t(search ? 'search_title' : 'brain')),
+      subtitle: Text(mine
+          ? '${t('brain_downloading')} ${(brain.progress! * 100).round()}%'
+          : brain.loading && has && !ready
+              ? t('brain_loading')
+              : ready
+                  ? t('brain_on')
+                  : t(has ? 'brain_bad' : (search ? 'search_note' : 'brain_note'))),
+      trailing: mine || (brain.loading && has && !ready)
+          ? null
+          : has
+              ? TextButton(onPressed: () => brain.remove(search: search), child: Text(t('brain_remove')))
+              : FilledButton(
+                  onPressed: brain.progress != null ? null : () => _download(context, search: search),
+                  child: Text(t('brain_get'))),
+    );
   }
 
   @override
@@ -115,25 +139,10 @@ class Settings extends StatelessWidget {
                 value: store.dark,
                 onChanged: (_) => store.toggleDark(),
               ),
-              // Gamy's brain: download once, then he answers in his own words, offline
-              ListTile(
-                leading: const Icon(Icons.psychology),
-                title: Text(t('brain')),
-                subtitle: Text(brain.progress != null
-                    ? '${t('brain_downloading')} ${brain.step}/${brain.steps} · ${(brain.progress! * 100).round()}%'
-                    : brain.loading
-                        ? t('brain_loading')
-                        : brain.ready && brain.has
-                            ? t('brain_on')
-                            : brain.ready
-                                ? t('brain_more') // has the brain from before, but not smart search yet
-                                : t(brain.has ? 'brain_bad' : 'brain_note')),
-                trailing: brain.progress != null || brain.loading
-                    ? null
-                    : brain.has
-                        ? TextButton(onPressed: brain.remove, child: Text(t('brain_remove')))
-                        : FilledButton(onPressed: () => _download(context), child: Text(t('brain_get'))),
-              ),
+              // Gamy's brain (answers in his own words) and smart search (finds answers by meaning):
+              // each downloaded once, then offline
+              _model(context, search: false),
+              _model(context, search: true),
               ListTile(
                 leading: const Icon(Icons.workspace_premium),
                 title: Text(store.pro ? 'Gamy Pro' : t('free_plan')),

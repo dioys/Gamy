@@ -226,6 +226,13 @@ void main() {
       expect(store.agreed, isFalse);
       await tester.ensureVisible(find.text(t('skip')));
       await tester.tap(find.text(t('skip')));
+      await tester.pumpAndSettle();
+      // Then Gamy's brain: what it does and its size, with "Download now" or "Skip for now".
+      expect(find.text(t('brain_step')), findsOneWidget);
+      expect(find.text(t('brain_now')), findsOneWidget);
+      expect(store.agreed, isFalse);
+      await tester.ensureVisible(find.text(t('skip')));
+      await tester.tap(find.text(t('skip')));
       expect(store.agreed, isTrue);
     });
 
@@ -453,7 +460,7 @@ void main() {
       store.agree();
       await tester.pumpWidget(const GamyApp());
       await tester.pump();
-      expect(find.textContaining(t('hello')), findsWidgets); // his greeting, then a quote
+      expect(find.text(t('hello')), findsWidgets); // his greeting
 
       await tester.tap(find.text(t('quiz')));
       await tester.pump();
@@ -467,7 +474,8 @@ void main() {
       await tester.pumpAndSettle();
       expect(find.byType(Settings), findsOneWidget);
       expect(find.text(t('brain_note')), findsOneWidget, reason: 'brain not downloaded yet');
-      expect(find.text(t('brain_get')), findsOneWidget);
+      expect(find.text(t('search_note')), findsOneWidget, reason: 'smart search is its own optional row');
+      expect(find.text(t('brain_get')), findsNWidgets(2), reason: 'one Download for the brain, one for smart search');
       await close(tester);
     });
   });

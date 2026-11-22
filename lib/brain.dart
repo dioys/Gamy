@@ -9,15 +9,15 @@ import 'store.dart';
 
 // ----- Gamy's brain: a small AI model that runs on this device (llama.cpp through llamadart) -----
 // Downloaded once, then it works offline. No API keys, no server.
-// Model: Qwen3 0.6B (Apache 2.0), Q4_K_M quantization, about 480 MB.
+// Model: Qwen3 0.6B (Apache 2.0), Q4_K_M quantization, about 480 MB (the best quality for its size).
 // To try another .gguf model, change these two lines (and the size shown in strings.dart).
 const _url = 'https://huggingface.co/bartowski/Qwen_Qwen3-0.6B-GGUF/resolve/main/Qwen_Qwen3-0.6B-Q4_K_M.gguf';
 const _name = 'brain.gguf';
-// Smart search (like LlamaIndex, but on the device): EmbeddingGemma 300M (Gemma license), Q8_0, about 330 MB.
+// Smart search (like LlamaIndex, but on the device): EmbeddingGemma 300M (Gemma license), Q4_0, about 280 MB
+// (almost the same quality as the 330 MB Q8_0). An optional extra download, so the brain alone stays smaller.
 // It turns text into "meaning vectors", so Gamy finds lines by meaning, even across English and Taglish.
-const _searchUrl = 'https://huggingface.co/unsloth/embeddinggemma-300m-GGUF/resolve/main/embeddinggemma-300M-Q8_0.gguf';
+const _searchUrl = 'https://huggingface.co/unsloth/embeddinggemma-300m-GGUF/resolve/main/embeddinggemma-300M-Q4_0.gguf';
 const _searchName = 'search.gguf';
-const _files = [(_url, _name), (_searchUrl, _searchName)];
 
 // Who Gamy is, for every brain request (Chat and Quiz). Kept short: short prompts = fast replies.
 // Savage and funny every time, with slang (Taglish in Filipino), but the roast is about the answer,
@@ -32,9 +32,9 @@ String gamyIs() => 'You are Gamy, a savage, funny study bear for college student
 class Brain extends ChangeNotifier {
   LlamaEngine? _engine, _search; // the chat model and the smart search model
   Future<void> _turn = Future.value(); // requests wait for the one before them to finish
-  bool has = false; // both model files are on this device
+  bool has = false, hasSearch = false; // the brain / smart search files are on this device
   double? progress; // 0..1 while downloading, null otherwise
-  int step = 0, steps = 0; // which file is downloading ("1/2")
+  bool searching = false; // the download in progress is smart search (not the brain)
   bool loading = false;
 
   bool get ready => _engine != null;
@@ -44,7 +44,8 @@ class Brain extends ChangeNotifier {
 
   // On app start: load whatever was downloaded before, in the background.
   Future<void> start() async {
-    has = await (await _fileOf(_name)).exists() && await (await _fileOf(_searchName)).exists();
+    has = await (await _fileOf(_name)).exists();
+    hasSearch = await (await _fileOf(_searchName)).exists();
     notifyListeners();
     await _load();
   }
@@ -74,50 +75,43 @@ class Brain extends ChangeNotifier {
     notifyListeners();
   }
 
-  // Downloads the model with progress. Saves to a .part file first, so a cut download is never used.
-  // Returns false if it failed (no internet, not enough space...).
-  // Downloads only the files that are missing (someone who has the brain gets just smart search).
-  Future<bool> download() async {
+  // Downloads the brain, or smart search when [search] is true, with progress. Saves to a .part file first,
+  // so a cut download is never used. Returns false if it failed (no internet, not enough space...).
+  Future<bool> download({bool search = false}) async {
+    if (progress != null) return false; // one download at a time
     final client = HttpClient();
-    File? part;
+    final file = await _fileOf(search ? _searchName : _name), part = File('${file.path}.part');
     try {
-      final missing = [
-        for (final (url, name) in _files)
-          if (!await (await _fileOf(name)).exists()) (url, name)
-      ];
-      steps = missing.length;
-      for (final (url, name) in missing) {
-        step++;
-        final file = await _fileOf(name);
-        part = File('${file.path}.part');
-        progress = 0;
-        notifyListeners();
-        final res = await (await client.getUrl(Uri.parse(url))).close();
-        if (res.statusCode != 200) throw 'HTTP ${res.statusCode}';
-        final sink = part.openWrite();
-        var got = 0;
-        await for (final chunk in res) {
-          sink.add(chunk);
-          got += chunk.length;
-          if (res.contentLength > 0) {
-            progress = got / res.contentLength;
-            notifyListeners();
-          }
+      searching = search;
+      progress = 0;
+      notifyListeners();
+      final res = await (await client.getUrl(Uri.parse(search ? _searchUrl : _url))).close();
+      if (res.statusCode != 200) throw 'HTTP ${res.statusCode}';
+      final sink = part.openWrite();
+      var got = 0;
+      await for (final chunk in res) {
+        sink.add(chunk);
+        got += chunk.length;
+        if (res.contentLength > 0) {
+          progress = got / res.contentLength;
+          notifyListeners();
         }
-        await sink.close();
-        await part.rename(file.path);
       }
-      has = true;
+      await sink.close();
+      await part.rename(file.path);
+      if (search) {
+        hasSearch = true;
+      } else {
+        has = true;
+      }
       progress = null;
-      step = steps = 0;
       notifyListeners();
       await _load();
       return true;
     } catch (e) {
-      debugPrint('Brain download failed: $e');
-      if (part != null && await part.exists()) await part.delete();
+      debugPrint('Download failed: $e');
+      if (await part.exists()) await part.delete();
       progress = null;
-      step = steps = 0;
       notifyListeners();
       return false;
     } finally {
@@ -125,16 +119,19 @@ class Brain extends ChangeNotifier {
     }
   }
 
-  // Unloads and deletes the model to free the space.
-  Future<void> remove() async {
-    await _engine?.dispose();
-    await _search?.dispose();
-    _engine = _search = null;
-    for (final (_, name) in _files) {
-      final file = await _fileOf(name);
-      if (await file.exists()) await file.delete();
+  // Unloads and deletes the brain, or smart search when [search] is true, to free the space.
+  Future<void> remove({bool search = false}) async {
+    if (search) {
+      await _search?.dispose();
+      _search = null;
+      hasSearch = false;
+    } else {
+      await _engine?.dispose();
+      _engine = null;
+      has = false;
     }
-    has = false;
+    final file = await _fileOf(search ? _searchName : _name);
+    if (await file.exists()) await file.delete();
     notifyListeners();
   }
 

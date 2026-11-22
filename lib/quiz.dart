@@ -1,5 +1,3 @@
-import 'dart:async';
-
 import 'package:flutter/material.dart';
 import 'package:flutter/services.dart';
 import 'package:url_launcher/url_launcher.dart';
@@ -37,54 +35,6 @@ int nextLine(String key, int n) {
   if (deck.isEmpty) deck.addAll(List.generate(n, (i) => i)..shuffle());
   return deck.removeLast();
 }
-
-// What Gamy says when nobody answered anything for 45 seconds (in the quiz bubble, or a message on phones).
-const teases = {
-  'en': [
-    "What's taking you so long? Is it that hard?",
-    "Bro, the question isn't going to answer itself.",
-    "I've seen sloths answer faster. And they don't even study.",
-    'Tick tock. My fur is turning gray here.',
-    "Staring at it won't make the answer appear, bro.",
-    'Did you fall asleep? Blink twice if you need help.',
-    'Take your time... but not ALL of it.',
-    "Even my grandma would've finished by now. She's a bear. She can't read.",
-    'Are you reading the question or memorizing it?',
-    'Big yikes. Still nothing?',
-    'Hint: the answer is in your module. Which you read. Right?',
-    "I hibernate for months and you're making that look short.",
-    'Should I get comfortable? Feels like a long one.',
-    "You know there's a Hint button, right?",
-    'Breathe. Think. Then actually type something.',
-    'No pressure. Just your whole grade.',
-    "The clock's moving, bro. Your answers aren't.",
-    'Plot twist: a guess also counts as an answer.',
-    "If overthinking were a subject, you'd ace it.",
-    'Somewhere, a deadline is laughing at you.',
-  ],
-  'fil': [
-    'Ano ba, ang tagal mo naman. Ganun ba kahirap?',
-    'Boi, hindi sasagot ang tanong nang mag-isa.',
-    'Kapag may tiyaga, may nilaga... pero ikaw, puro tiyaga, walang sagot.',
-    'Nasa huli ang pagsisisi. Kaya sumagot ka na ngayon.',
-    'Ang hindi lumingon sa module, hindi makakasagot sa quiz.',
-    'Aanhin pa ang oras kung hindi ka rin naman sasagot?',
-    'Huy, gising ka pa ba? Kumurap ka nang dalawang beses kung kailangan mo ng tulong.',
-    'Mas mabilis pang mag-load ang data ko kaysa sa sagot mo, boi.',
-    'Titigan mo pa, baka sumagot ang tanong. Joke lang, hindi.',
-    'Dahan-dahan lang... pero hindi naman ganyan kabagal.',
-    "May Hint button, alam mo ba 'yon?",
-    'Ang lala, wala pa ring sagot?',
-    "Walang pressure. Grade mo lang naman 'yan.",
-    'Habang may buhay, may pag-asa. Habang walang sagot, may bagsak.',
-    "Bahala na? Hindi pwede 'yan sa quiz, boi.",
-    'Pumuti na ang balahibo ko kakahintay.',
-    'Ang sobrang pag-iisip, nakakabaliw. Ang hindi pagsagot, nakakabagsak.',
-    'Plot twist: ang hula, sagot din.',
-    'Para kang jeep na naghihintay mapuno. Ang tagal!',
-    'Ang tunay na kaibigan, nakikilala sa gipitan. Ang tunay na estudyante, sumasagot.',
-  ],
-};
 
 const roasts = {
   'en': [
@@ -147,7 +97,6 @@ class _QuizState extends State<Quiz> {
   final _scroll = ScrollController();
   final _cards = <int, GlobalKey>{}; // to scroll to a question (the first blank one)
   final _blank = <int>{}; // questions left blank when "Check" was pressed: highlighted until answered
-  Timer? _idle; // Gamy teases after 45 seconds without any answer
   bool done = false, review = false;
   bool making = false; // the quiz is being made (long modules take a while)
   String roast = '';
@@ -162,35 +111,16 @@ class _QuizState extends State<Quiz> {
       .trim()
       .replaceFirst(RegExp(r'^(the|a|an|ang|mga) '), '');
 
-  // Every answer restarts the 45-second wait (and removes that question's "no answer yet" mark).
+  // An answer removes that question's "no answer yet" mark.
   void _answered(int i, String v) {
     setState(() {
       answers[i] = v;
       if (v.trim().isNotEmpty) _blank.remove(i);
     });
-    _wait();
   }
-
-  void _wait() {
-    _idle?.cancel();
-    if (qs != null && !done) _idle = Timer(const Duration(seconds: 45), _tease);
-  }
-
-  void _tease() {
-    if (!mounted || qs == null || done) return;
-    final lines = teases[store.lang]!, line = lines[nextLine('tease${store.lang}', lines.length)];
-    // A message bar at the bottom (the quiz uses the whole screen, so Gamy isn't beside it).
-    ScaffoldMessenger.of(context)
-      ..hideCurrentSnackBar() // a new message replaces the old one instead of waiting behind it
-      ..showSnackBar(SnackBar(content: Text('🐻 $line'), duration: const Duration(seconds: 8)));
-    _wait(); // and again in 45 seconds if still nothing
-  }
-
-  void _stopTeasing() => _idle?.cancel();
 
   @override
   void dispose() {
-    _idle?.cancel();
     _scroll.dispose();
     super.dispose();
   }
@@ -281,7 +211,6 @@ class _QuizState extends State<Quiz> {
         more.clear();
         done = review = false;
       });
-      _wait(); // Gamy starts timing (he teases after 45 seconds without answers)
     } catch (e) {
       ScaffoldMessenger.of(context)
         ..hideCurrentSnackBar() // a new message replaces the old one instead of waiting behind it
@@ -308,7 +237,6 @@ class _QuizState extends State<Quiz> {
       if (card != null) Scrollable.ensureVisible(card, duration: const Duration(milliseconds: 300), alignment: 0.1);
       return;
     }
-    _stopTeasing();
     final r = _right;
     try {
       store.addScore(subject!, {
@@ -391,7 +319,6 @@ class _QuizState extends State<Quiz> {
   }
 
   void _reset() {
-    _stopTeasing();
     setState(() => qs = null);
     store.setMood(1, 'idle');
   }
@@ -499,7 +426,6 @@ class _QuizState extends State<Quiz> {
               onChanged: (v) {
                 answers[i] = v; // no rebuild while typing
                 if (_blank.contains(i) && v.trim().isNotEmpty) setState(() => _blank.remove(i));
-                _wait();
               },
             ),
           if (!done && !hints.contains(i) && q.hint.isNotEmpty)

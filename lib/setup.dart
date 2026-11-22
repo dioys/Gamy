@@ -1,12 +1,14 @@
 import 'package:flutter/material.dart';
 
 import 'account.dart';
+import 'brain.dart';
 import 'store.dart';
 import 'terms.dart';
 
 // First launch (and again whenever the terms change):
 //   1. the Terms of Use and Privacy Policy, full screen, agreed with one checkbox (18 or older + agree);
-//   2. a recommendation to sign in with Google, with the reasons, or "Skip for now".
+//   2. a recommendation to sign in with Google, with the reasons, or "Skip for now";
+//   3. Gamy's brain: what it does and its size, "Download now" (keeps going in the background) or "Skip for now".
 class Setup extends StatefulWidget {
   const Setup({super.key});
   @override
@@ -14,27 +16,59 @@ class Setup extends StatefulWidget {
 }
 
 class _SetupState extends State<Setup> {
-  bool agree = false, signInStep = false;
+  bool agree = false, signInStep = false, brainStep = false;
 
   @override
   Widget build(BuildContext context) =>
-      ListenableBuilder(listenable: Listenable.merge([store, account]), builder: (context, _) => _page(context));
+      ListenableBuilder(listenable: Listenable.merge([store, account, brain]), builder: (context, _) => _page(context));
 
-  // Agreed: already signed in (the terms changed) goes straight in; otherwise the sign-in recommendation.
-  void _agreed() => account.user != null ? store.agree() : setState(() => signInStep = true);
+  // Agreed: already signed in (the terms changed) skips the sign-in step; already has the brain skips that one.
+  void _agreed() => account.user != null ? _next() : setState(() => signInStep = true);
+  void _next() => brain.has ? store.agree() : setState(() => brainStep = true);
 
   Future<void> _signIn() async {
     final bar = ScaffoldMessenger.of(context), err = await account.signIn();
     if (err != null) {
       bar.showSnackBar(SnackBar(content: Text(store.t(err))));
     } else if (account.user != null) {
-      store.agree();
+      _next();
     }
+  }
+
+  // The download keeps going in the background (its progress shows in Settings), and Gamy opens right away.
+  void _getBrain() {
+    brain.download();
+    store.agree();
   }
 
   Widget _page(BuildContext context) {
     final t = store.t, text = Theme.of(context).textTheme;
     final language = TextButton(onPressed: store.setLang, child: Text(store.lang == 'en' ? 'Filipino' : 'English'));
+    if (brainStep) {
+      return Scaffold(
+        body: Center(
+          child: ConstrainedBox(
+            constraints: const BoxConstraints(maxWidth: 480),
+            child: SingleChildScrollView(
+              padding: const EdgeInsets.all(24),
+              child: Column(crossAxisAlignment: CrossAxisAlignment.stretch, mainAxisSize: MainAxisSize.min, children: [
+                Image.asset('assets/gamy/think_1.png', height: 140),
+                Text(t('brain_step'), textAlign: TextAlign.center, style: text.headlineSmall),
+                const SizedBox(height: 12),
+                for (final why in t('brain_why').split('\n'))
+                  ListTile(dense: true, leading: const Icon(Icons.psychology_outlined), title: Text(why)),
+                const SizedBox(height: 12),
+                FilledButton.icon(onPressed: _getBrain, icon: const Icon(Icons.download), label: Text(t('brain_now'))),
+                const SizedBox(height: 8),
+                OutlinedButton(onPressed: store.agree, child: Text(t('skip'))),
+                const SizedBox(height: 8),
+                Text(t('brain_later'), textAlign: TextAlign.center, style: text.bodySmall),
+              ]),
+            ),
+          ),
+        ),
+      );
+    }
     if (signInStep) {
       return Scaffold(
         body: Center(
@@ -55,7 +89,7 @@ class _SetupState extends State<Setup> {
               else ...[
                 FilledButton.icon(onPressed: _signIn, icon: const Icon(Icons.login), label: Text(t('sign_in'))),
                 const SizedBox(height: 8),
-                OutlinedButton(onPressed: store.agree, child: Text(t('skip'))),
+                OutlinedButton(onPressed: _next, child: Text(t('skip'))),
               ],
               const SizedBox(height: 8),
               Text(t('skip_note'), textAlign: TextAlign.center, style: text.bodySmall),

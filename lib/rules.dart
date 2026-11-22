@@ -167,6 +167,7 @@ List<_Fact> _facts(String text) {
     out.add((term: term, meaning: meaning[0].toUpperCase() + meaning.substring(1), source: source));
   }
 
+
   for (final line in text.split('\n')) {
     final l = line.trim(), m = _colonDef.firstMatch(l);
     if (m != null && !_skip.hasMatch(l)) add(m[1]!, m[2]!, l);
@@ -177,7 +178,19 @@ List<_Fact> _facts(String text) {
     final m = RegExp(r'^[A-Z].*[.!?]$').hasMatch(s) ? _isDef.firstMatch(s) ?? _isDefFil.firstMatch(s) : null;
     if (m != null) add(m[1]!, m[2]!, s);
   }
-  return out..shuffle(_rng);
+  return out; // in module order: localItems spreads its picks over the whole module
+}
+
+// A natural true-or-false sentence: the module's own sentence with [meaning] in it
+// ("A router is a device that..."), or "Term is meaning." when the module wrote "Term: meaning".
+String _statement(_Fact f, String meaning) {
+  final m = meaning.length > 1 && meaning[1] == meaning[1].toLowerCase()
+      ? meaning[0].toLowerCase() + meaning.substring(1) // "A device that..." -> "a device that..."
+      : meaning; // an acronym or a name keeps its capitals
+  final at = f.source.toLowerCase().indexOf(f.meaning.toLowerCase());
+  final before = at > 0 ? f.source.substring(0, at) : '';
+  if (before.isNotEmpty && !before.contains(':')) return '$before$m.';
+  return store.t('r_is').replaceFirst('{t}', f.term).replaceFirst('{m}', m);
 }
 
 String _fill(String template, Map<String, String> values) =>
@@ -187,14 +200,23 @@ String _fill(String template, Map<String, String> values) =>
 List<Map> localItems(String text, String type, int count) {
   final facts = _facts(text);
   if (facts.isEmpty) throw 'no_facts';
-  final t = store.t, picked = facts.take(count).toList();
+  // Spread the questions over the WHOLE module (not just its first pages): when there are more definitions
+  // than questions, take one from each part of the module, then shuffle the order.
+  final n = facts.length, c = min(count, n), step = n / c, start = _rng.nextDouble() * step;
+  final t = store.t, picked = [for (var i = 0; i < c; i++) facts[(start + i * step).floor().clamp(0, n - 1)]]
+    ..shuffle(_rng);
   if (type == 'match') return [for (final f in picked) {'term': f.term, 'meaning': f.meaning}];
+
+  // A mixed quiz is balanced: the types take turns (10 questions with 4 types = 3, 3, 2, 2), in random order.
+  // (Multiple choice needs 4 terms to choose from.)
+  final kinds = ['tf', 'fill', 'id', if (n >= 4) 'mc']..shuffle(_rng);
+  final mixed = [for (var i = 0; i < c; i++) kinds[i % kinds.length]]..shuffle(_rng);
+  var turn = 0;
 
   return [
     for (final f in picked)
       () {
-        // In a mixed quiz each question gets a random type (multiple choice needs 4 terms to choose from).
-        var k = type == 'mix' ? (['tf', 'fill', 'id', if (facts.length >= 4) 'mc']..shuffle(_rng)).first : type;
+        var k = type == 'mix' ? mixed[turn++] : type;
         if (k == 'mc' && facts.length < 4) k = 'id';
         final others = [for (final o in facts) if (o != f) o]..shuffle(_rng);
         final hint = _fill(t('r_hint'), {'c': f.term[0].toUpperCase(), 'n': '${f.term.length}'});
@@ -217,9 +239,9 @@ List<Map> localItems(String text, String type, int count) {
             final shown = lie ? others.first : f;
             return {
               'type': 'tf',
-              'q': _fill(t('r_means'), {'t': f.term, 'm': shown.meaning}),
+              'q': _statement(f, shown.meaning), // "Blue is the color of blood."
               'answer': lie ? 'False' : 'True',
-              'why': _fill(t('r_means'), {'t': f.term, 'm': f.meaning}),
+              'why': _statement(f, f.meaning),
               'hint': '',
               'wrong': lie
                   ? {'True': _fill(t('r_belongs'), {'t': shown.term})}
