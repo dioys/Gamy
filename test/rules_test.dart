@@ -155,6 +155,8 @@ void main() {
         for (final k in ['mc', 'tf', 'fill', 'id']) {
           expect(types.where((x) => x == k).length, 3, reason: '$k in $types');
         }
+        // ...and grouped into parts like a printed exam: identification, true or false, multiple choice, fill in
+        expect(types, [for (final k in mixOrder) ...List.filled(3, k)]);
       }
     });
 

@@ -376,7 +376,19 @@ class _QuizState extends State<Quiz> {
           ),
         ),
       if (!done || review)
-        for (var i = 0; i < qs!.length; i++) _card(i, t),
+        for (var i = 0; i < qs!.length; i++) ...[
+          // Mixed quiz: a heading at the start of each part ("Part II: True or false")
+          if (type == 'mix' && (i == 0 || qs![i].type != qs![i - 1].type))
+            Padding(
+              padding: const EdgeInsets.fromLTRB(4, 16, 4, 8),
+              child: Text(
+                '${t('part')} ${const ['I', 'II', 'III', 'IV', 'V'][qs!.take(i + 1).map((q) => q.type).toSet().length - 1]}: '
+                '${t(qs![i].type)}',
+                style: Theme.of(context).textTheme.titleMedium?.copyWith(fontWeight: FontWeight.bold),
+              ),
+            ),
+          _card(i, t),
+        ],
       if (!done) FilledButton(onPressed: _submit, child: Text(t('submit'))),
     ]));
   }

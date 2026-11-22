@@ -213,7 +213,7 @@ List<Map> localItems(String text, String type, int count) {
   final mixed = [for (var i = 0; i < c; i++) kinds[i % kinds.length]]..shuffle(_rng);
   var turn = 0;
 
-  return [
+  final items = [
     for (final f in picked)
       () {
         var k = type == 'mix' ? mixed[turn++] : type;
@@ -257,7 +257,13 @@ List<Map> localItems(String text, String type, int count) {
         return {'type': 'id', 'q': askWhat, 'answer': f.term, 'why': f.source, 'hint': hint};
       }(),
   ];
+  // A mixed quiz is grouped into parts like a printed exam: identification first, then true or false,
+  // multiple choice, and fill in the blank (the quiz screen shows a heading for each part).
+  if (type == 'mix') items.sort((a, b) => mixOrder.indexOf('${a['type']}').compareTo(mixOrder.indexOf('${b['type']}')));
+  return items;
 }
+
+const mixOrder = ['id', 'tf', 'mc', 'fill'];
 
 // ----- Chat without AI: find the module sentences that best match the question -----
 const _stop = {
