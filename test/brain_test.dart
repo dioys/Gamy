@@ -117,4 +117,53 @@ void main() {
   },
       skip: _dir == null ? 'Set GAMY_BRAIN_DIR to the folder with brain.gguf to run this' : false,
       timeout: const Timeout(Duration(minutes: 5)));
+
+  // Nov 23: Chat hung on a 700-page algebra book, because smart search read the whole book before answering.
+  // Now the question is answered right away and the book is read in the background, saved as it goes.
+  test('a chat question never waits for smart search to read a big module', () async {
+    if (!brain.searchReady) {
+      PathProviderPlatform.instance = FakePath(_dir!);
+      await brain.start();
+    }
+    final dir = await freshStore(); // the models stay loaded; the lessons go to a new empty folder
+    store.restoreModule(store.subjectNamed('Algebra'), 'Big book', List.filled(300, sample).join('\n'));
+    final clock = Stopwatch()..start();
+    await store.search('What stores data when the computer is off?', store.subjects.single['modules'], 3);
+    // ignore: avoid_print
+    print('Answered in ${clock.elapsedMilliseconds} ms while the book is still being read');
+    expect(clock.elapsedMilliseconds, lessThan(5000));
+    await Future<void>.delayed(const Duration(seconds: 5));
+    final found = await store.search('What stores data when the computer is off?', store.subjects.single['modules'], 3);
+    expect(found, isNotEmpty, reason: 'the first pieces were read and saved meanwhile');
+    store.close();
+    await dir.delete(recursive: true);
+  },
+      skip: _dir == null ? 'Set GAMY_BRAIN_DIR to the folder with brain.gguf to run this' : false,
+      timeout: const Timeout(Duration(minutes: 5)));
+
+  // Bug from Nov 22: smart search always said "Download failed" because the file name had a capital "M"
+  // ("300M-Q4_0"); Hugging Face's file is "embeddinggemma-300m-Q4_0.gguf" and names are case-sensitive.
+  test('the download links use the exact Hugging Face file names', () {
+    final code = File('lib/brain.dart').readAsStringSync();
+    expect(code, contains('/resolve/main/embeddinggemma-300m-Q4_0.gguf'));
+    expect(code, contains('/resolve/main/Qwen_Qwen3-0.6B-Q4_K_M.gguf'));
+  });
+
+  // Nov 22: the download error says the real reason instead of always "check your internet and free space".
+  test('a failed download says why', () {
+    expect(whyFailed(const SocketException('Failed host lookup')), 'why_net');
+    expect(whyFailed(const FileSystemException('write', 'brain.gguf.part', OSError('No space left on device', 28))),
+        'why_space');
+    expect(whyFailed(const FileSystemException('write', 'x', OSError('There is not enough space on the disk', 112))),
+        'why_space');
+    expect(whyFailed('HTTP 404'), 'why_missing');
+    expect(whyFailed('cut'), 'why_cut');
+    for (final lang in ['en', 'fil']) {
+      store.lang = lang;
+      for (final k in ['why_net', 'why_space', 'why_missing', 'why_cut']) {
+        expect(store.t('brain_failed').replaceFirst('{why}', store.t(k)), isNot(contains('{')), reason: k);
+      }
+    }
+    store.lang = 'en';
+  });
 }

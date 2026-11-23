@@ -14,6 +14,7 @@ class Upload extends StatefulWidget {
 
 class _UploadState extends State<Upload> {
   bool busy = false;
+  Map? opened; // the subject just added: shown open, so its modules and upload button are right there
 
   Future<void> _addSubject() async {
     var name = '';
@@ -33,13 +34,23 @@ class _UploadState extends State<Upload> {
         ],
       ),
     );
-    if (ok == true && name.trim().isNotEmpty) store.addSubject(name.trim());
+    if (ok != true || name.trim().isEmpty) return;
+    // Nov 23: right after adding a subject, the file picker opens for its modules (no extra tap on the subject).
+    store.addSubject(name.trim());
+    setState(() => opened = store.subjects.last);
+    await _addModule(store.subjects.last);
   }
 
   Future<void> _addModule(Map s) async {
     if (!store.canUpload) return showPro(context, store.t('pro_uploads')); // free plan: 3 uploads total
     setState(() => busy = true);
-    final failed = await store.addModules(s, ask: _askSame); // several files can be picked at once
+    List<String> failed;
+    try {
+      failed = await store.addModules(s, ask: _askSame); // several files can be picked at once
+    } catch (e) {
+      debugPrint('File picker failed: $e'); // the picker couldn't open: nothing was added
+      failed = [];
+    }
     if (!mounted) return;
     setState(() => busy = false);
     final pro = failed.remove('pro_uploads');
@@ -113,6 +124,7 @@ class _UploadState extends State<Upload> {
         Card(
           key: ObjectKey(s),
           child: ExpansionTile(
+            initiallyExpanded: identical(s, opened),
             title: Text(s['name']),
             subtitle: Text('${(s['modules'] as List).length} ${t('modules')}'),
             children: [

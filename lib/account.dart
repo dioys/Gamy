@@ -64,7 +64,8 @@ class Account extends ChangeNotifier {
   DocumentReference<Map<String, dynamic>> _subject(String name) => _me.collection('subjects').doc(cloudId(name));
 
   // Returns an error key, or null when signed in (or when the student closed the sign-in).
-  Future<String?> signIn() async {
+  // [leaving]: the account being changed away from (see changeAccount).
+  Future<String?> signIn({String? leaving}) async {
     if (!_on) return 'sign_in_failed';
     busy = true;
     notifyListeners();
@@ -72,6 +73,7 @@ class Account extends ChangeNotifier {
       final token = await _token();
       if (token == null) return 'sign_in_cancelled'; // closed, or Google stopped it (the reason is in the log)
       await FirebaseAuth.instance.signInWithCredential(GoogleAuthProvider.credential(idToken: token));
+      if (leaving != null && user!.uid != leaving) store.clearLessons(); // before sync, so nothing mixes
       if (!(await _me.get()).exists) await _me.set({'created': FieldValue.serverTimestamp()});
       await sync();
       return null;
@@ -155,6 +157,19 @@ class Account extends ChangeNotifier {
       client.close();
       await server.close(force: true);
     }
+  }
+
+  // Switches Google accounts. Only after every change reached the old account's online copy (so nothing is
+  // lost), and the old lessons leave this device once the new account is in. Cancelled = nothing changes.
+  Future<String?> changeAccount() async {
+    final old = user!.uid;
+    try {
+      await FirebaseFirestore.instance.waitForPendingWrites().timeout(const Duration(seconds: 15));
+    } catch (_) {
+      return 'change_offline';
+    }
+    if (_google) await GoogleSignIn.instance.signOut(); // so Android shows the account picker again
+    return signIn(leaving: old);
   }
 
   // Lessons on this device stay; only the online link ends.

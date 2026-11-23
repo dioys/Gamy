@@ -19,6 +19,7 @@ class _ChatState extends State<Chat> {
   final msgs = <(bool, String)>[]; // (from Gamy?, text)
   final input = TextEditingController();
   bool busy = false; // the brain is still writing
+  bool _toldBrain = false; // said once per chat how to get the brain, when it isn't downloaded
   Timer? _nap;
 
   @override
@@ -56,7 +57,11 @@ class _ChatState extends State<Chat> {
   }
 
   // Who Gamy is, plus his source: the module lines that match the question, or else a Wikipedia page.
-  String _gamy(List<Line> lines, WikiPage? page) => '${gamyIs()} Answer in 1 to 3 short sentences, '
+  // Nov 22: "1 to 3 short sentences" gave answers too short to understand. Now he explains like to a classmate.
+  String _gamy(List<Line> lines, WikiPage? page) => '${gamyIs()} Explain it in simple, everyday words that a '
+      'classmate who missed the lesson would understand, in 3 to 5 short sentences: say what it is, then how it '
+      'works or what it is for, with a small example if the text has one. Explain any hard term you use. Write math '
+      'as plain text like x^2 or a/b, never LaTeX or \$ signs. Answer '
       '${page == null ? 'using only the module lines below. If they do not answer the question, say it is not in their module.'
           '\n\nModule lines:\n${lines.isEmpty ? '(nothing matched)' : lines.map((l) => '- ${l.text}').join('\n')}' : 'using only the Wikipedia text below. Say first that it is not in their module.'
           '\n\nWikipedia (${page.title}):\n${page.text}'}';
@@ -90,8 +95,11 @@ class _ChatState extends State<Chat> {
           : inModule || words == null
               ? findAnswer(s, mods)
               : store.t('not_found_offline');
+      // No brain downloaded: he can only quote the module, so he says once how to get real explanations.
+      final tip = !brain.has && !_toldBrain ? '\n\n${store.t('chat_needs_brain')}' : '';
+      if (tip.isNotEmpty) _toldBrain = true;
       setState(() {
-        msgs.add((true, reply));
+        msgs.add((true, '$reply$tip'));
         busy = false;
       });
       await talk(0, reply);
@@ -102,7 +110,7 @@ class _ChatState extends State<Chat> {
     store.setMood(0, 'talk'); // his mouth moves while the words come in
     var reply = '';
     try {
-      await for (final w in brain.say(_gamy(lines, page), s)) {
+      await for (final w in brain.say(_gamy(lines, page), s, maxTokens: 300)) {
         reply += w;
         if (mounted) setState(() => msgs.last = (true, cleanReply(reply)));
       }
@@ -139,7 +147,7 @@ class _ChatState extends State<Chat> {
                   child: Container(
                     margin: const EdgeInsets.symmetric(vertical: 3),
                     padding: const EdgeInsets.symmetric(horizontal: 10, vertical: 6),
-                    constraints: const BoxConstraints(maxWidth: 360),
+                    constraints: const BoxConstraints(maxWidth: 560),
                     decoration: BoxDecoration(
                       color: msgs[i].$1 ? Colors.white : const Color(0xFFE8C9A0),
                       border: Border.all(color: ink, width: 1.5),
@@ -152,7 +160,8 @@ class _ChatState extends State<Chat> {
         ),
         if (!tight) ...[
           ConstrainedBox(
-            constraints: BoxConstraints(maxWidth: 520, maxHeight: min(narrow ? 170.0 : 220.0, room)),
+            // Nov 23: bigger for long replies (it scrolls inside when even this isn't enough).
+            constraints: BoxConstraints(maxWidth: 760, maxHeight: min(narrow ? 300.0 : 420.0, box.maxHeight * .45)),
             child: Bubble(msgs[shown].$2.isEmpty ? '...' : msgs[shown].$2),
           ),
           GestureDetector(onTap: _tapGamy, child: GamySprite(store.moods[0], size: min(narrow ? 150.0 : 230.0, room))),

@@ -128,9 +128,27 @@ final _fns = <String, double Function(num)>{
 final _candidate = RegExp(r'(?<![\w)])([A-Za-z](?:_?\d+|_[A-Za-z]{1,3})?)\s*=\s*([^=,;:\n]+)');
 final _stop = RegExp(r'\s+[a-z]{2,}\b|\s+[A-Za-z]{3,}\b|\.(?!\d)');
 
+// Proof books write "L1 = p1L" for joining maps, not numbers. A "formula" with arrows, ⊗, ∈... or words like
+// "prove" or "linear map" within 200 characters is skipped (Nov 23, a 700-page algebra book).
+final _abstract = RegExp(
+    r'[→↦⊗⊕∈∉⊆⊂≅∗∘]|\b(?:prove|show that|isomorphi|homomorphi|linear map|vector space|subgroup|submodule|bijection)',
+    caseSensitive: false);
+// A proof book: a proof word or sign every 1,000 characters or less (Nov 23: the algebra book has one every
+// 160; number modules have one every 3,000 or more). Its letters stand for maps and sets, not numbers, so its
+// "formulas" make no number problems ("Using k = m + 1, find m...").
+final _proofWords = RegExp('${_abstract.pattern}|\\b(?:theorem|lemma|proposition|proof)\\b', caseSensitive: false);
+bool proofBook(String text) {
+  final n = _proofWords.allMatches(text).length;
+  return n >= 20 && n * 1000 > text.length; // at least 20, so one "proof" in a short module doesn't count
+}
+
+bool _inProof(String text, Match m) =>
+    _abstract.hasMatch(text.substring(max(0, m.start - 200), min(text.length, m.end + 200)));
+
 List<Formula> formulas(String text) {
   final out = <Formula>[], seen = <String>{};
   for (final m in _candidate.allMatches(text)) {
+    if (_inProof(text, m)) continue;
     final result = m[1]!, math = m[2]!.split(_stop).first.trim();
     final pieces = _tokens(math);
     if (pieces == null || pieces.isEmpty) continue;
@@ -199,6 +217,13 @@ const _methods = {
   'bisection': r'bisection|interval halving',
 };
 
+// A method counts only when the module really teaches it: at least one mention per 50,000 characters.
+// Nov 23: a 700-page algebra book that names "Jacobi" twice in passing got Jacobi problems.
+bool _teaches(String text, String pattern) {
+  final n = RegExp(pattern, caseSensitive: false).allMatches(text).length;
+  return n > 0 && n * 50000 >= text.length;
+}
+
 // What to look up on Wikipedia for "More about..." in the review.
 const _topics = {'false_position': 'Regula falsi', 'bisection': 'Bisection method'};
 
@@ -253,7 +278,7 @@ String _put(String math, Map<String, double> values) {
 List<Map> methodItems(String text) {
   final t = store.t, out = <Map>[];
   for (final e in _methods.entries) {
-    if (!RegExp(e.value, caseSensitive: false).hasMatch(text)) continue;
+    if (!_teaches(text, e.value)) continue;
     for (final f in functions(text)) {
       double y(double x) => f.calc({f.inputs.single: x});
       for (var a = -10; a < 10; a++) {
@@ -290,12 +315,238 @@ List<Map> methodItems(String text) {
   return out..shuffle(_rng);
 }
 
+// ----- Systems of linear equations: Jacobi and Gauss-Seidel (numerical methods, part III) -----
+// Reads systems like "3x − 2y + z = 11" (2 to 4 unknowns, one equation per line) from the module, and also
+// makes new ones with whole-number answers, then solves them the way the module does: convergence check,
+// each equation written for its own unknown, iteration 1 worked out, the iteration table, and the answer.
+const _sysMethods = {'jacobi': r'jacobi', 'seidel': r'seidel'};
+const _sysTopics = {'jacobi': 'Jacobi method', 'seidel': 'Gauss–Seidel method'};
+
+typedef LinSystem = ({List<String> vars, List<List<double>> a, List<double> b, double tol});
+// One row of the iteration table: the values after iteration k, and dₖ (null for the starting guess).
+typedef SysRow = ({List<double> x, double? d});
+
+final _eqLine = RegExp(r'^[+-]?(?:\d+(?:\.\d+)?)?[a-z]\d?(?:[+-](?:\d+(?:\.\d+)?)?[a-z]\d?)+=[+-]?\d+(?:\.\d+)?$');
+final _term = RegExp(r'([+-]?)(\d+(?:\.\d+)?)?([a-z]\d?)');
+
+// One equation line -> {unknown: coefficient} and the number after "=", or null if it isn't one.
+(Map<String, double>, double)? _equation(String line) {
+  final l = line.replaceAll(RegExp(r'[−–—]'), '-').replaceAll(RegExp(r'\s+'), '');
+  if (!_eqLine.hasMatch(l)) return null;
+  final sides = l.split('='), coef = <String, double>{};
+  for (final m in _term.allMatches(sides[0])) {
+    if (coef.containsKey(m[3])) return null; // "x + x = 2" is not a system row
+    coef[m[3]!] = (m[1] == '-' ? -1 : 1) * (m[2] == null ? 1 : double.parse(m[2]!));
+  }
+  return (coef, double.parse(sides[1]));
+}
+
+int _byName(String a, String b) => a.length != b.length ? a.length.compareTo(b.length) : a.compareTo(b);
+
+// Puts the equations in an order where each one's diagonal number is bigger than the rest of its row
+// (so the methods surely work), or null if no order does.
+List<int>? _dominantOrder(List<List<double>> a) {
+  final n = a.length;
+  List<int>? go(List<int> used) {
+    if (used.length == n) return used;
+    final i = used.length;
+    for (var r = 0; r < n; r++) {
+      if (used.contains(r)) continue;
+      final rest = [for (var j = 0; j < n; j++) if (j != i) a[r][j].abs()].fold(0.0, (x, y) => x + y);
+      if (a[r][i].abs() > rest) {
+        final done = go([...used, r]);
+        if (done != null) return done;
+      }
+    }
+    return null;
+  }
+  return go([]);
+}
+
+// Systems written in the module (each counted once, even when an example repeats it in another order).
+List<LinSystem> systems(String text) {
+  final out = <LinSystem>[], seen = <String>{};
+  final lines = text.replaceAll('\r', '').split('\n');
+  for (var i = 0; i < lines.length; i++) {
+    final rows = <(Map<String, double>, double)>[];
+    var k = i;
+    for (; k < lines.length && rows.length < 4; k++) {
+      final e = _equation(lines[k].trim());
+      if (e == null || e.$1.length < 2) break;
+      rows.add(e);
+    }
+    final vars = {for (final r in rows) ...r.$1.keys}.toList()..sort(_byName);
+    if (rows.length < 2 || vars.length != rows.length) continue;
+    final a = [for (final r in rows) [for (final v in vars) r.$1[v] ?? 0.0]], b = [for (final r in rows) r.$2];
+    // The module's stopping rule, like "dk ≤ 0.001", near the system; else 0.001.
+    final near = lines.skip(max(0, i - 3)).take(rows.length + 6).join(' ');
+    final tol = double.tryParse(RegExp(r'≤\s*(0?\.\d+)').firstMatch(near)?[1] ?? '') ?? 0.001;
+    final key = ([for (var r = 0; r < a.length; r++) '${a[r].join(',')}=${b[r]}']..sort()).join(';');
+    if (seen.add(key)) out.add((vars: vars, a: a, b: b, tol: tol));
+    i = k - 1;
+  }
+  return out;
+}
+
+// A new practice system: 3 unknowns, whole-number answers from -5 to 5, diagonal numbers big enough to work.
+LinSystem practiceSystem() {
+  int pick() => _rng.nextInt(7) - 3;
+  final sol = [for (var i = 0; i < 3; i++) (_rng.nextInt(5) + 1) * (_rng.nextBool() ? 1 : -1)];
+  final a = <List<double>>[];
+  for (var i = 0; i < 3; i++) {
+    final row = [for (var j = 0; j < 3; j++) j == i ? 0 : pick()];
+    row[i] = row.fold(0, (x, y) => x + y.abs()) + _rng.nextInt(5) + 2;
+    a.add([for (final c in row) c.toDouble()]);
+  }
+  final b = [for (final row in a) [for (var j = 0; j < 3; j++) row[j] * sol[j]].fold(0.0, (x, y) => x + y)];
+  return (vars: ['x', 'y', 'z'], a: a, b: b, tol: 0.001);
+}
+
+// Iterates from all zeros until dₖ ≤ tol (dₖ = the biggest |new − old| ÷ |new|). Null if it doesn't settle.
+List<SysRow>? iterateSystem(String method, LinSystem s) {
+  final n = s.vars.length, rows = <SysRow>[(x: List.filled(n, 0.0), d: null)];
+  for (var k = 0; k < 100; k++) {
+    final old = rows.last.x, x = [...old];
+    for (var i = 0; i < n; i++) {
+      final from = method == 'seidel' ? x : old; // Gauss-Seidel uses each new value right away
+      var rest = 0.0;
+      for (var j = 0; j < n; j++) {
+        if (j != i) rest += s.a[i][j] * from[j];
+      }
+      x[i] = (s.b[i] - rest) / s.a[i][i];
+    }
+    if (x.any((v) => !v.isFinite || v.abs() > 1e9)) return null;
+    final d = [for (var i = 0; i < n; i++) (x[i] - old[i]).abs() / (x[i] == 0 ? 1 : x[i].abs())].reduce(max);
+    rows.add((x: x, d: d));
+    if (d <= s.tol) return rows;
+  }
+  return null;
+}
+
+String _num(double d) => fmt(d).replaceFirst('-', '−');
+
+// "3x − 2y + z = 11"
+String _eqText(LinSystem s, int r) {
+  final out = StringBuffer();
+  for (var j = 0; j < s.vars.length; j++) {
+    final c = s.a[r][j];
+    if (c == 0) continue;
+    final size = c.abs() == 1 ? '' : fmt(c.abs());
+    out.write(out.isEmpty ? '${c < 0 ? '−' : ''}$size${s.vars[j]}' : ' ${c < 0 ? '−' : '+'} $size${s.vars[j]}');
+  }
+  return '$out = ${_num(s.b[r])}';
+}
+
+// "x = [11 − (−2y + z)] / 3", or with numbers in: "x = [11 − (−2(0) + (0))] / 3"
+String _rewritten(LinSystem s, int i, [List<double>? values]) {
+  final parts = <String>[];
+  for (var j = 0; j < s.vars.length; j++) {
+    final c = s.a[i][j];
+    if (j == i || c == 0) continue;
+    final what = values == null ? s.vars[j] : '(${values[j].toStringAsFixed(4).replaceFirst('-', '−')})';
+    final size = c.abs() == 1 ? '' : fmt(c.abs());
+    parts.add(parts.isEmpty ? '${c < 0 ? '−' : ''}$size$what' : '${c < 0 ? '−' : '+'} $size$what');
+  }
+  if (parts.isEmpty) return '${s.vars[i]} = ${_num(s.b[i])} / ${_num(s.a[i][i])}';
+  return '${s.vars[i]} = [${_num(s.b[i])} − (${parts.join(' ')})] / ${_num(s.a[i][i])}';
+}
+
+String _sysTable(LinSystem s, List<SysRow> rows, {int? mark}) {
+  final t = store.t;
+  String c(Object v) => (v is double ? v.toStringAsFixed(4) : '$v').padLeft(10);
+  final out = ['  k${s.vars.map(c).join()}${c('dk')}  ${t('sys_remark')}'];
+  for (var k = 0; k < rows.length; k++) {
+    final r = rows[k], last = k == rows.length - 1;
+    out.add('${'$k'.padLeft(3)}${r.x.map(c).join()}${c(r.d ?? '-')}  '
+        '${k == 0 ? '' : t(last ? 'sys_stop' : 'sys_go')}${k == mark ? '  <-' : ''}');
+  }
+  return out.join('\n');
+}
+
+// Problems for every system (the module's own, plus [practice] new ones) and every method the module names:
+// a value after iteration 1 and 2, and each unknown's final answer, all with the full solution.
+List<Map> systemItems(String text, {int practice = 2}) {
+  final t = store.t, out = <Map>[];
+  final names = [for (final e in _sysMethods.entries) if (_teaches(text, e.value)) e.key];
+  if (names.isEmpty) return out;
+  final all = [...systems(text), for (var i = 0; i < practice; i++) practiceSystem()];
+  for (final given in all) {
+    final order = _dominantOrder(given.a);
+    final s = order == null
+        ? given
+        : (vars: given.vars, a: [for (final r in order) given.a[r]], b: [for (final r in order) given.b[r]], tol: given.tol);
+    for (final m in names) {
+      final rows = iterateSystem(m, s);
+      if (rows == null || rows.length < 4) continue;
+      final n = s.vars.length, zeros = '(${List.filled(n, '0').join(', ')})';
+      final parts = {
+        'm': t('m_$m'),
+        'start': '(${s.vars.join(', ')})',
+        'zeros': zeros,
+        'tol': '${s.tol}',
+        'eqs': [for (var r = 0; r < n; r++) '   ${_eqText(given, r)}'].join('\n'),
+        'how': t('sys_how_$m'),
+      };
+      // The first iteration with the numbers in (Gauss-Seidel uses each new value as soon as it has one).
+      final first = <String>[];
+      final now = List.filled(n, 0.0);
+      for (var i = 0; i < n; i++) {
+        final used = m == 'seidel' ? now : rows[0].x;
+        first.add('   ${_rewritten(s, i, used)} = ${rows[1].x[i].toStringAsFixed(4)}');
+        now[i] = rows[1].x[i];
+      }
+      String why(int? mark) => [
+            _fill(t('m_sol'), parts),
+            if (order != null) ...[
+              t('sys_check'),
+              for (var r = 0; r < n; r++)
+                '   |${fmt(s.a[r][r])}| > ${[for (var j = 0; j < n; j++) if (j != r) '|${fmt(s.a[r][j])}|'].join(' + ')}',
+              if (order.indexed.any((e) => e.$1 != e.$2)) t('sys_order'),
+            ] else
+              t('sys_not_dominant'),
+            t('sys_rewrite'),
+            for (var i = 0; i < n; i++) '   ${_rewritten(s, i)}',
+            _fill(t('sys_first'), parts),
+            ...first,
+            _fill(t('sys_table'), parts),
+            _sysTable(s, rows, mark: mark),
+            '${t('sys_answer')} ${[for (var i = 0; i < n; i++) '${s.vars[i]} = ${rows.last.x[i].toStringAsFixed(4)}'].join(', ')}',
+          ].join('\n');
+      final item = {'type': 'solve', 'hint': _fill(t('sys_hint'), parts), 'topic': _sysTopics[m]};
+      for (final k in [1, 2]) {
+        final v = _rng.nextInt(n);
+        out.add({
+          ...item,
+          'q': _fill(t('sys_step'), {...parts, 'v': s.vars[v], 'k': '$k'}),
+          'answer': rows[k].x[v].toStringAsFixed(4),
+          'why': why(k),
+        });
+      }
+      for (var v = 0; v < n; v++) {
+        out.add({
+          ...item,
+          'q': _fill(t('sys_root'), {...parts, 'v': s.vars[v]}),
+          'answer': rows.last.x[v].toStringAsFixed(4),
+          'why': why(rows.length - 1),
+        });
+      }
+    }
+  }
+  return out..shuffle(_rng);
+}
+
 List<Map> solveItems(String text, int count) {
   // A numerical-methods module gets problems on its own methods; other modules get formula problems.
-  final methods = methodItems(text);
+  final methods = [...methodItems(text), ...systemItems(text)]..shuffle(_rng);
   if (methods.isNotEmpty) return methods.take(count).toList();
-  final fs = [...formulas(text), ...functions(text)];
-  if (fs.isEmpty) throw 'no_formulas';
+  if (proofBook(text)) throw 'proof_book';
+  final all = [...formulas(text), ...functions(text)];
+  if (all.isEmpty) throw 'no_formulas';
+  // Nov 23: problems come from the whole module, evenly spread (like the other quiz types), not from its first
+  // pages: 50 problems from a 700-page book all came from the first 10%.
+  final step = all.length / min(count, all.length), start = _rng.nextDouble() * step;
+  final fs = [for (var i = 0; i < min(count, all.length); i++) all[(start + i * step).floor().clamp(0, all.length - 1)]]
+    ..shuffle(_rng);
   final t = store.t, out = <Map>[];
   for (var n = 0; out.length < count && n < count * 20; n++) {
     final f = fs[n % fs.length];

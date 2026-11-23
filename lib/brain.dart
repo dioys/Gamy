@@ -16,18 +16,31 @@ const _name = 'brain.gguf';
 // Smart search (like LlamaIndex, but on the device): EmbeddingGemma 300M (Gemma license), Q4_0, about 280 MB
 // (almost the same quality as the 330 MB Q8_0). An optional extra download, so the brain alone stays smaller.
 // It turns text into "meaning vectors", so Gamy finds lines by meaning, even across English and Taglish.
-const _searchUrl = 'https://huggingface.co/unsloth/embeddinggemma-300m-GGUF/resolve/main/embeddinggemma-300M-Q4_0.gguf';
+const _searchUrl = 'https://huggingface.co/unsloth/embeddinggemma-300m-GGUF/resolve/main/embeddinggemma-300m-Q4_0.gguf'; // lowercase "m": the exact file name on Hugging Face
 const _searchName = 'search.gguf';
 
 // Who Gamy is, for every brain request (Chat and Quiz). Kept short: short prompts = fast replies.
 // Savage and funny every time, with slang (Taglish in Filipino), but the roast is about the answer,
 // never about who the person is.
 String gamyIs() => 'You are Gamy, a savage, funny study bear for college students. '
-    'Every reply is short and roasts a little: no mercy for wrong answers or lazy questions, '
+    'Every reply roasts a little: no mercy for wrong answers or lazy questions, '
     'but you still give the right answer. Roast the answer, not the person: no slurs, no insults about '
     'looks, family or identity. Never say that you are joking or roasting.'
     ' Use at most one short joke, never several in a row.'
     '${store.lang == 'fil' ? ' Reply in Taglish like a Filipino barkada, with slang like "boi" or "ang lala".' : ' Use casual slang like "bro" or "big yikes".'}';
+
+// Why a download failed, in words the student can act on (Nov 22: every failure used to say "check your
+// internet and free space", even when the real problem was a wrong file name online).
+String whyFailed(Object e) {
+  if (e is FileSystemException) {
+    final code = e.osError?.errorCode;
+    // 28 = disk full on Android/Linux, 112 = disk full on Windows
+    if (code == 28 || code == 112 || '${e.osError?.message}'.toLowerCase().contains('space')) return 'why_space';
+  }
+  if (e is SocketException || e is HandshakeException || e is HttpException || e is TimeoutException) return 'why_net';
+  if ('$e'.startsWith('HTTP ')) return 'why_missing'; // the server answered, but has no such file (404, 403...)
+  return 'why_cut';
+}
 
 class Brain extends ChangeNotifier {
   LlamaEngine? _engine, _search; // the chat model and the smart search model
@@ -73,12 +86,13 @@ class Brain extends ChangeNotifier {
     }
     loading = false;
     notifyListeners();
+    store.indexInBackground(); // smart search starts reading any module it hasn't read yet
   }
 
   // Downloads the brain, or smart search when [search] is true, with progress. Saves to a .part file first,
-  // so a cut download is never used. Returns false if it failed (no internet, not enough space...).
-  Future<bool> download({bool search = false}) async {
-    if (progress != null) return false; // one download at a time
+  // so a cut download is never used. Returns null when done, or why it failed (a strings.dart key, see whyFailed).
+  Future<String?> download({bool search = false}) async {
+    if (progress != null) return null; // one download at a time (the button is off meanwhile)
     final client = HttpClient();
     final file = await _fileOf(search ? _searchName : _name), part = File('${file.path}.part');
     try {
@@ -98,6 +112,7 @@ class Brain extends ChangeNotifier {
         }
       }
       await sink.close();
+      if (res.contentLength > 0 && got < res.contentLength) throw 'cut'; // the connection ended early
       await part.rename(file.path);
       if (search) {
         hasSearch = true;
@@ -107,13 +122,13 @@ class Brain extends ChangeNotifier {
       progress = null;
       notifyListeners();
       await _load();
-      return true;
+      return null;
     } catch (e) {
       debugPrint('Download failed: $e');
       if (await part.exists()) await part.delete();
       progress = null;
       notifyListeners();
-      return false;
+      return whyFailed(e);
     } finally {
       client.close();
     }
@@ -159,9 +174,19 @@ class Brain extends ChangeNotifier {
 
   // Smart search. Vectors come back normalized, so closeness in meaning = the dot product of two vectors.
   // The text formats are the ones the model was trained with ("document" vs "query").
+  // The smart search model does one job at a time: a chat question waits for the current small batch of
+  // background reading (a second or two), never for a whole module.
+  Future<void> _searchTurn = Future.value();
+  Future<T> _oneAtATime<T>(Future<T> Function() job) {
+    final done = _searchTurn.then((_) => job());
+    _searchTurn = done.then((_) {}, onError: (_) {});
+    return done;
+  }
+
   Future<List<List<double>>> embedChunks(List<String> chunks) =>
-      _search!.embedBatch([for (final c in chunks) 'title: none | text: $c']);
-  Future<List<double>> embedQuestion(String question) => _search!.embed('task: search result | query: $question');
+      _oneAtATime(() => _search!.embedBatch([for (final c in chunks) 'title: none | text: $c']));
+  Future<List<double>> embedQuestion(String question) =>
+      _oneAtATime(() => _search!.embed('task: search result | query: $question'));
 }
 
 final brain = Brain();

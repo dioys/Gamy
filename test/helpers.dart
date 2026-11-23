@@ -32,6 +32,9 @@ const facts = {
   'A small, very fast memory inside the processor that stores data used often': 'Cache memory',
 };
 
+// The description an identification question shows: "3. A device that sends data." -> "A device that sends data"
+String meaningOf(String q) => q.replaceFirst(RegExp(r'^\d+\. '), '').replaceFirst(RegExp(r'\.$'), '');
+
 Map<String, dynamic> subject() => {
       'name': 'CSS',
       'modules': [

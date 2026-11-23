@@ -67,7 +67,8 @@ void main() {
   testWidgets('asking for 10 multiple choice questions gives exactly 10', (tester) async {
     await start(tester, _twelve);
     expect(questions(), findsNWidgets(10));
-    expect(find.textContaining(t('fewer').split('{n}').last), findsNothing, reason: 'no "only found" notice');
+    expect(find.textContaining(t('fewer').split('{n}').last.split('{asked}').first), findsNothing,
+        reason: 'no "only N questions" notice');
     await tester.pumpWidget(const SizedBox());
   });
 
@@ -82,7 +83,11 @@ void main() {
   testWidgets('fewer good questions than asked: Gamy says how many he found', (tester) async {
     await start(tester, _twelve.split('\n').take(5).join('\n'));
     expect(questions(), findsNWidgets(5));
-    expect(find.text(t('fewer').replaceFirst('{n}', '5')), findsOneWidget);
+    final notice = find.text(t('fewer').replaceFirst('{n}', '5').replaceFirst('{asked}', '10'));
+    expect(notice, findsOneWidget);
+    // Nov 22: the notice stays at the top of the quiz (a pop-up was gone after 4 seconds).
+    await tester.pump(const Duration(seconds: 30));
+    expect(notice, findsOneWidget);
     await tester.pumpWidget(const SizedBox());
   });
 
@@ -138,7 +143,7 @@ void main() {
     final fields = find.byType(TextField);
     for (var i = 0; i < 10; i++) {
       final q = tester.widget<Text>(find.textContaining(RegExp('^${i + 1}\\. '))).data!;
-      final term = terms[RegExp(r'"(.*)"').firstMatch(q)![1]]!;
+      final term = terms[meaningOf(q)]!;
       await tester.enterText(fields.at(i), 'The ${term.toUpperCase().replaceAll(' ', '-')}.');
     }
     await tester.tap(find.text(t('submit')));

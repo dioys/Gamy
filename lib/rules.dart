@@ -79,11 +79,69 @@ String plainText(String s) {
       .replaceAll('ﬄ', 'ffl');
 }
 
-String cleanReply(String text) => cleanPrivate(text)
+String cleanReply(String text) => mathText(cleanPrivate(text))
     .replaceAll(RegExp(r'\*\*|__|`|^#+\s*', multiLine: true), '')
     .replaceAll(RegExp(r'\s*-{2,}\s*'), ' ')
     .replaceAll(RegExp(r'[ \t]{2,}'), ' ')
     .trim();
+
+// ----- Math that reads well (Nov 23: the brain writes LaTeX like "$ p^a q^b $") -----
+const _sup = {
+  '0': '⁰', '1': '¹', '2': '²', '3': '³', '4': '⁴', '5': '⁵', '6': '⁶', '7': '⁷', '8': '⁸', '9': '⁹', '+': '⁺',
+  '-': '⁻', '−': '⁻', '=': '⁼', '(': '⁽', ')': '⁾', 'a': 'ᵃ', 'b': 'ᵇ', 'c': 'ᶜ', 'd': 'ᵈ', 'e': 'ᵉ', 'f': 'ᶠ',
+  'g': 'ᵍ', 'h': 'ʰ', 'i': 'ⁱ', 'j': 'ʲ', 'k': 'ᵏ', 'l': 'ˡ', 'm': 'ᵐ', 'n': 'ⁿ', 'o': 'ᵒ', 'p': 'ᵖ', 'r': 'ʳ',
+  's': 'ˢ', 't': 'ᵗ', 'u': 'ᵘ', 'v': 'ᵛ', 'w': 'ʷ', 'x': 'ˣ', 'y': 'ʸ', 'z': 'ᶻ',
+};
+const _sub = {
+  '0': '₀', '1': '₁', '2': '₂', '3': '₃', '4': '₄', '5': '₅', '6': '₆', '7': '₇', '8': '₈', '9': '₉', 'a': 'ₐ', 'e': 'ₑ',
+  'h': 'ₕ', 'i': 'ᵢ', 'j': 'ⱼ', 'k': 'ₖ', 'l': 'ₗ', 'm': 'ₘ', 'n': 'ₙ', 'o': 'ₒ', 'p': 'ₚ', 'r': 'ᵣ', 's': 'ₛ', 't': 'ₜ',
+  'u': 'ᵤ', 'v': 'ᵥ', 'x': 'ₓ', '+': '₊', '-': '₋',
+};
+
+// Real exponents: "x^2" -> "x²", "e^(-x)" -> "e⁻ˣ", "p^{n+1}" -> "pⁿ⁺¹". Left as is when a character has no
+// small version (like "q" or a decimal point), so nothing is ever shown wrong.
+String powers(String s) =>
+    s.replaceAllMapped(RegExp(r'\^(?:\{([^{}]{1,12})\}|\(([^()]{1,12})\)|(-?\d+(?:\.\d+)?|[A-Za-z]))'), (m) {
+      final p = (m[1] ?? m[2] ?? m[3]!).replaceAll(' ', '');
+      return p.split('').every(_sup.containsKey) ? p.split('').map((c) => _sup[c]).join() : m[0]!;
+    });
+
+// LaTeX the brain (or Wikipedia) writes, as plain readable math: no "$", "\frac", "\cdot"...
+String mathText(String s) {
+  const words = {
+    'cdot': '·', 'times': '×', 'div': '÷', 'leq': '≤', 'le': '≤', 'geq': '≥', 'ge': '≥', 'neq': '≠', 'ne': '≠',
+    'pm': '±', 'approx': '≈', 'infty': '∞', 'pi': 'π', 'theta': 'θ', 'alpha': 'α', 'beta': 'β', 'gamma': 'γ',
+    'delta': 'δ', 'Delta': 'Δ', 'sigma': 'σ', 'Sigma': 'Σ', 'mu': 'μ', 'lambda': 'λ', 'sum': 'Σ', 'in': '∈',
+    'to': '→', 'rightarrow': '→', 'circ': '°', 'ldots': '…', 'dots': '…', 'left': '', 'right': '',
+    'cdots': '⋯', 'vdots': '⋮', 'ddots': '⋱', 'phi': 'φ', 'varphi': 'φ', 'Phi': 'Φ', 'psi': 'ψ', 'Psi': 'Ψ',
+    'omega': 'ω', 'Omega': 'Ω', 'rho': 'ρ', 'tau': 'τ', 'epsilon': 'ε', 'varepsilon': 'ε', 'eta': 'η', 'kappa': 'κ',
+    'nu': 'ν', 'xi': 'ξ', 'chi': 'χ', 'zeta': 'ζ', 'Gamma': 'Γ', 'Lambda': 'Λ', 'Pi': 'Π', 'Theta': 'Θ',
+    'prod': 'Π', 'int': '∫', 'partial': '∂', 'nabla': '∇', 'forall': '∀', 'exists': '∃', 'subset': '⊂',
+    'subseteq': '⊆', 'cup': '∪', 'cap': '∩', 'emptyset': '∅', 'mid': '|', 'quad': ' ', 'qquad': ' ', 'equiv': '≡',
+    'cong': '≅', 'otimes': '⊗', 'oplus': '⊕', 'neg': '¬', 'Rightarrow': '⇒', 'iff': '⇔', 'mapsto': '↦',
+  };
+  // Matrices: each row on its own line in brackets, "&" as spaces: [a b c]
+  s = s.replaceAllMapped(RegExp(r'\\begin\{[pbvB]?matrix\}([\s\S]*?)\\end\{[pbvB]?matrix\}'), (m) {
+    final rows = m[1]!.split(r'\\').map((r) => r.replaceAll('&', ' ').replaceAll(RegExp(r'\s+'), ' ').trim());
+    return rows.where((r) => r.isNotEmpty).map((r) => '[$r]').join('\n');
+  });
+  s = s
+      .replaceAllMapped(RegExp(r'\$\$\s*([\s\S]{1,800}?)\s*\$\$'), (m) => m[1]!) // a "$$ ... $$" block, even on many lines
+      .replaceAllMapped(RegExp(r'\$\s*(?!\d)([^$\n]{1,160}?)\s*\$'), (m) => m[1]!) // "$ x^2 $", not "$5 and $10"
+      .replaceAll(RegExp(r'\\[()\[\]]'), '')
+      .replaceAllMapped(RegExp(r'\\(?:text|mathrm|mathbf|mathbb|operatorname)\{([^{}]*)\}'), (m) => m[1]!)
+      .replaceAllMapped(RegExp(r'\\[dt]?frac\{([^{}]+)\}\{([^{}]+)\}'), (m) => '(${m[1]})/(${m[2]})')
+      .replaceAllMapped(RegExp(r'\\sqrt\{([^{}]+)\}'), (m) => '√(${m[1]})')
+      .replaceAllMapped(RegExp(r'\\([A-Za-z]+)'), (m) => words[m[1]] ?? (m[1]!.length > 2 ? m[1]! : m[0]!)) // unknown: the word without "\" ("\n" stays)
+      .replaceAll(RegExp(r'\\[,;!:]'), ' ')
+      .replaceAll(RegExp(r'\$(?!\d) ?'), '') // a "$" left alone (Gamy still writing, or a broken pair); "$5" stays
+      // x_1 -> x₁, y_n -> yₙ (after a single letter only, so Python names like file_2 stay)
+      .replaceAllMapped(RegExp(r'(?<=(?:^|[^\w])[A-Za-z])_(?:\{([0-9a-z+-]{1,4})\}|([0-9]{1,3}|[a-z]))(?![\w.])'), (m) {
+        final p = m[1] ?? m[2]!;
+        return p.split('').every(_sub.containsKey) ? p.split('').map((c) => _sub[c]).join() : m[0]!;
+      });
+  return powers(s);
+}
 
 // "Cache memory is a small, fast memory..." -> term + meaning
 final _isDef = RegExp(r'^(?:The |An? )?([A-Za-z][\w ()/-]{1,50}?) (?:is defined as|refers to|means|is|are) (.{10,})$',
@@ -124,6 +182,11 @@ final _pronoun = RegExp(
     caseSensitive: false);
 // A real term never has these words inside or at its end. They mean a heading got glued onto a sentence
 // ("Microprocessor Systems This", "I/O Interfacing Introduction A microprocessor").
+// A pointer to another part of the book, not a fact: "see Figure 3", "Problems 32–36", "the end of the chapter".
+final _crossRef = RegExp(
+    r'\b(?:problems?|exercises?|examples?|figures?|fig\.|tables?|sections?|chapters?|pages?|equations?|eqs?\.|'
+    r'theorems?|lemmas?|propositions?|corollar(?:y|ies)|appendix)\s*\(?(?:\d|[IVX]+\b)|\bend of (?:the |this )?(?:chapter|section|book)',
+    caseSensitive: false);
 final _glued = RegExp(r'\b(a|an|the|this|that|these|those|it|is|are)\b', caseSensitive: false);
 
 // A line only joins the next one when the sentence clearly continues: it ends with a small letter or comma
@@ -161,6 +224,7 @@ List<_Fact> _facts(String text) {
         RegExp(r'\d').hasMatch(term) || // "Chapter 4", "BSCpE 3B"
         RegExp(r'\d:\d\d').hasMatch(meaning) || // a time like 1:00
         _weak.hasMatch(meaning) ||
+        _crossRef.hasMatch(meaning) || // Nov 23: "left to Problems 32–36 at the end of the chapter"
         !seen.add(term.toLowerCase())) {
       return;
     }
@@ -220,7 +284,8 @@ List<Map> localItems(String text, String type, int count) {
         if (k == 'mc' && facts.length < 4) k = 'id';
         final others = [for (final o in facts) if (o != f) o]..shuffle(_rng);
         final hint = _fill(t('r_hint'), {'c': f.term[0].toUpperCase(), 'n': '${f.term.length}'});
-        final askWhat = _fill(t('r_id'), {'m': f.meaning});
+        // Just the description, like most teachers' identification tests ("A device that sends data...").
+        final askWhat = RegExp(r'[.?!]$').hasMatch(f.meaning) ? f.meaning : '${f.meaning}.';
         switch (k) {
           case 'mc':
             final wrong = others.take(3).toList();

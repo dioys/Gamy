@@ -99,6 +99,7 @@ class _QuizState extends State<Quiz> {
   final _blank = <int>{}; // questions left blank when "Check" was pressed: highlighted until answered
   bool done = false, review = false;
   bool making = false; // the quiz is being made (long modules take a while)
+  int asked = 0; // how many questions the student asked for
   String roast = '';
 
   List<Map> get _folders => [for (final s in store.subjects) if ((s['modules'] as List).isNotEmpty) s];
@@ -192,17 +193,12 @@ class _QuizState extends State<Quiz> {
       final items = type == 'solve' ? solveItems(text, count) : localItems(text, type, count);
       final list = type == 'match' ? _matching(items) : [for (final m in items) ?_question(m)];
       if (list.isEmpty) throw 'bad_quiz';
-      // Fewer good questions than asked for: say so instead of padding the quiz with junk.
-      if (list.length < count) {
-        ScaffoldMessenger.of(context)
-          ..hideCurrentSnackBar()
-          ..showSnackBar(SnackBar(content: Text(t('fewer').replaceFirst('{n}', '${list.length}'))));
-      }
       store.useItems(list.length); // counts toward the free weekly 70
       setState(() {
         subject = folder;
         moduleName = modules.map((m) => m['name']).join(', ');
         qs = list;
+        asked = count;
         _cards.clear();
         _blank.clear();
         answers.clear();
@@ -215,7 +211,7 @@ class _QuizState extends State<Quiz> {
       ScaffoldMessenger.of(context)
         ..hideCurrentSnackBar() // a new message replaces the old one instead of waiting behind it
         ..showSnackBar(
-          SnackBar(content: Text(t(e == 'no_facts' || e == 'no_formulas' ? '$e' : 'bad_quiz'))));
+          SnackBar(content: Text(t(['no_facts', 'no_formulas', 'proof_book'].contains(e) ? '$e' : 'bad_quiz'))));
     } finally {
       if (mounted) setState(() => making = false);
     }
@@ -348,6 +344,17 @@ class _QuizState extends State<Quiz> {
           alignment: Alignment.centerRight,
           child: TextButton.icon(onPressed: _quit, icon: const Icon(Icons.close), label: Text(t('quit_quiz'))),
         ),
+      // Fewer good questions than asked for: said at the top (it stays), instead of padding the quiz with junk.
+      if (!done && qs!.length < asked)
+        Container( // not a Card: question cards are counted by position
+          margin: const EdgeInsets.only(bottom: 8),
+          decoration: BoxDecoration(
+              color: Theme.of(context).colorScheme.secondaryContainer, borderRadius: BorderRadius.circular(12)),
+          child: ListTile(
+            leading: const Icon(Icons.info_outline),
+            title: Text(t('fewer').replaceFirst('{n}', '${qs!.length}').replaceFirst('{asked}', '$asked')),
+          ),
+        ),
       if (done)
         // The result fills the screen with everything centered (Gamy, his comment, the score and the buttons);
         // the answer sheet is below it when the student scrolls down.
@@ -406,7 +413,8 @@ class _QuizState extends State<Quiz> {
       child: Padding(
         padding: const EdgeInsets.all(12),
         child: Column(crossAxisAlignment: CrossAxisAlignment.start, children: [
-          Text('${i + 1}. ${q.q}', style: const TextStyle(fontWeight: FontWeight.bold)),
+          // Problems show real exponents: "x^3 − x − 1" as "x³ − x − 1".
+          Text('${i + 1}. ${q.type == 'solve' ? powers(q.q) : q.q}', style: const TextStyle(fontWeight: FontWeight.bold)),
           if (missing) Text(t('no_answer_yet'), style: TextStyle(color: Colors.red.shade700)),
           const SizedBox(height: 8),
           if (q.type == 'mc' || q.type == 'tf')
@@ -453,7 +461,7 @@ class _QuizState extends State<Quiz> {
               // Even-width font so the step table's columns line up; it scrolls sideways on phones.
               SingleChildScrollView(
                 scrollDirection: Axis.horizontal,
-                child: Text(q.why,
+                child: Text(powers(q.why),
                     style: const TextStyle(
                         fontFamily: 'monospace', fontFamilyFallback: ['Consolas', 'Courier New'], fontSize: 12, height: 1.4)),
               )

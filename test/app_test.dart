@@ -252,7 +252,7 @@ void main() {
       expect(fields, findsNWidgets(facts.length));
       for (var i = 0; i < facts.length; i++) {
         final q = tester.widget<Text>(find.textContaining(RegExp('^${i + 1}\\. '))).data!;
-        final meaning = RegExp(r'"(.*)"').firstMatch(q)![1];
+        final meaning = meaningOf(q);
         await tester.enterText(fields.at(i), '${facts[meaning]!.toUpperCase()}.');
       }
       await tester.tap(find.text(t('submit')));
@@ -270,7 +270,7 @@ void main() {
       for (var i = 0; i < facts.length; i++) {
         final q = tester.widget<Text>(find.textContaining(RegExp('^${i + 1}\\. '))).data!;
         // 3 right, the rest wrong (every question must be answered before checking)
-        await tester.enterText(fields.at(i), i < 3 ? facts[RegExp(r'"(.*)"').firstMatch(q)![1]]! : 'no idea');
+        await tester.enterText(fields.at(i), i < 3 ? facts[meaningOf(q)]! : 'no idea');
       }
       await tester.tap(find.text(t('submit')));
       await tester.pump();
@@ -292,7 +292,7 @@ void main() {
       // Now pick a wrong choice in every question.
       for (var i = 0; i < facts.length; i++) {
         final q = tester.widget<Text>(find.textContaining(RegExp('^${i + 1}\\. '))).data!;
-        final right = facts[RegExp(r'"(.*)"').firstMatch(q)![1]];
+        final right = facts[meaningOf(q)];
         final chips = find.descendant(of: find.byType(Card).at(i), matching: find.byType(ChoiceChip));
         for (var c = 0; c < 4; c++) {
           final label = tester.widget<Text>(find.descendant(of: chips.at(c), matching: find.byType(Text))).data;
@@ -434,6 +434,8 @@ void main() {
       await tester.tap(find.byIcon(Icons.send));
       await tester.pump();
       expect(find.textContaining('main circuit board'), findsWidgets);
+      // Nov 22: without the brain he says how to get it (where to tap), once per chat.
+      expect(find.textContaining(t('chat_needs_brain')), findsOneWidget);
 
       // Not in any module, and tests have no internet: Gamy says it's not there and he can't look it up.
       await tester.enterText(find.byType(TextField), 'photosynthesis chlorophyll');
@@ -442,6 +444,7 @@ void main() {
         await tester.pump(const Duration(milliseconds: 100)); // the (failed) Wikipedia lookup
       }
       expect(find.textContaining(t('not_found_offline')), findsWidgets);
+      expect(find.textContaining(t('chat_needs_brain')), findsOneWidget, reason: 'said once, not after every reply');
 
       await tester.pump(const Duration(seconds: 16)); // let Gamy finish "talking"
       await close(tester);

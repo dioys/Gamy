@@ -34,6 +34,27 @@ class Settings extends StatelessWidget {
     if (err != null) bar.showSnackBar(SnackBar(content: Text(store.t(err))));
   }
 
+  Future<void> _changeAccount(BuildContext context) async {
+    final bar = ScaffoldMessenger.of(context), nav = Navigator.of(context);
+    final yes = await showDialog<bool>(
+      context: context,
+      builder: (ctx) => AlertDialog(
+        content: Text(store.t('change_confirm').replaceFirst('{email}', account.user?.email ?? '')),
+        actions: [
+          TextButton(onPressed: () => Navigator.pop(ctx), child: Text(store.t('cancel'))),
+          FilledButton(onPressed: () => Navigator.pop(ctx, true), child: Text(store.t('change'))),
+        ],
+      ),
+    );
+    if (yes != true) return;
+    final err = await account.changeAccount();
+    if (err != null) {
+      bar.showSnackBar(SnackBar(content: Text(store.t(err))));
+      return;
+    }
+    nav.pop(); // Nov 23: changed: the Account window closes too (it showed the old details)
+  }
+
   Future<void> _deleteAccount(BuildContext context) async {
     final bar = ScaffoldMessenger.of(context);
     final yes = await showDialog<bool>(
@@ -53,7 +74,8 @@ class Settings extends StatelessWidget {
 
   Future<void> _download(BuildContext context, {bool search = false}) async {
     final bar = ScaffoldMessenger.of(context);
-    if (!await brain.download(search: search)) bar.showSnackBar(SnackBar(content: Text(store.t('brain_failed'))));
+    final why = await brain.download(search: search);
+    if (why != null) bar.showSnackBar(SnackBar(content: Text(store.t('brain_failed').replaceFirst('{why}', store.t(why)))));
   }
 
   // Tapping a row opens its details (like About Gamy): the full explanation and the buttons.
@@ -86,6 +108,11 @@ class Settings extends StatelessWidget {
           else if (user == null)
             FilledButton.icon(onPressed: () => _signIn(context), icon: const Icon(Icons.login), label: Text(t('sign_in')))
           else ...[
+            OutlinedButton.icon(
+                onPressed: () => _changeAccount(context),
+                icon: const Icon(Icons.switch_account),
+                label: Text(t('change_account'))),
+            const SizedBox(height: 8),
             OutlinedButton(onPressed: account.signOut, child: Text(t('sign_out'))),
             const SizedBox(height: 8),
             TextButton(

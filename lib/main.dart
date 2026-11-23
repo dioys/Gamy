@@ -72,7 +72,12 @@ class _GamyAppState extends State<GamyApp> {
                     ),
                   ),
                 ),
-                Expanded(child: IndexedStack(index: tab, children: [Chat(), Quiz(), Upload()])),
+                Expanded(child: IndexedStack(index: tab, children: [
+                  // A new key after changing account: the old account's chat and quiz are gone too.
+                  Chat(key: ValueKey('chat${store.fresh}')),
+                  Quiz(key: ValueKey('quiz${store.fresh}')),
+                  Upload(),
+                ])),
               ]),
             );
           }),

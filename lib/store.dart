@@ -183,6 +183,18 @@ class Store extends ChangeNotifier {
     _save();
   }
 
+  // Changing account: the old account's lessons leave this device (they're safe online), so two people's
+  // lessons never mix. Nothing is deleted online. Settings and the free-plan counters stay.
+  int fresh = 0; // goes up when the lessons are cleared, so Chat and Quiz start over (see main.dart)
+  void clearLessons() {
+    for (final table in ['subjects', 'modules', 'scores', 'chunks']) {
+      _db!.execute('DELETE FROM $table');
+    }
+    subjects = [];
+    fresh++;
+    notifyListeners();
+  }
+
   void setMood(int tab, String m) {
     moods[tab] = m;
     notifyListeners();
@@ -265,6 +277,7 @@ class Store extends ChangeNotifier {
       final err = await _addFile(subject, f, ask);
       if (err != null) failed.add('${f.name}: ${t(err)}');
     }
+    indexInBackground(); // smart search starts reading the new modules now
     return failed;
   }
 
@@ -331,12 +344,11 @@ class Store extends ChangeNotifier {
         }
       }
     }
-    final id = _put(subject, name, text);
+    _put(subject, name, text);
     uploads++;
     _save();
     account.saveModule(subject['name'], name, text);
-    if (brain.searchReady) await _index(id, text); // smart search pieces, made now while the spinner shows
-    return null;
+    return null; // smart search reads it in the background (indexInBackground, after the upload)
   }
 
   // ----- Smart search (needs brain.searchReady) -----
@@ -346,25 +358,49 @@ class Store extends ChangeNotifier {
     final q = await brain.embedQuestion(question), found = <Line>[];
     for (final m in modules) {
       if (m['id'] == null) continue;
-      var rows = _db!.select('SELECT text, vec FROM chunks WHERE module_id = ?', [m['id']]);
-      if (rows.isEmpty) {
-        await _index(m['id'], m['text'] as String);
-        rows = _db!.select('SELECT text, vec FROM chunks WHERE module_id = ?', [m['id']]);
-      }
+      // Only what smart search has read so far; the keyword search covers the rest meanwhile.
+      final rows = _db!.select('SELECT text, vec FROM chunks WHERE module_id = ?', [m['id']]);
       for (final r in rows) {
         found.add((score: (closeness(q, r['vec'] as List<int>) * 1000).round(), text: r['text'] as String, module: '${m['name']}'));
       }
     }
     found.sort((a, b) => b.score.compareTo(a.score));
+    indexInBackground();
     return found.take(n).toList();
   }
 
-  Future<void> _index(Object? moduleId, String text) async {
-    final parts = chunks(text);
-    if (parts.isEmpty) return;
-    final vectors = await brain.embedChunks(parts);
-    for (var i = 0; i < parts.length; i++) {
-      _db!.execute('INSERT INTO chunks (module_id, text, vec) VALUES (?, ?, ?)', [moduleId, parts[i], vectorBytes(vectors[i])]);
+  // Smart search reads each module once, in the background, 16 pieces at a time, saving as it goes (so
+  // closing Gamy halfway loses nothing). Chat never waits for it.
+  // Nov 23: it used to read a whole module before answering; a 700-page book took minutes and Gamy looked stuck.
+  bool _indexing = false;
+  final _read = Set<Map>.identity(); // modules smart search has fully read (so they aren't split up again)
+  Future<void> indexInBackground() async {
+    if (_indexing || _db == null || !brain.searchReady) return;
+    _indexing = true;
+    try {
+      for (final s in [...subjects]) {
+        for (final m in [...s['modules'] as List]) {
+          if (m['id'] == null || _read.contains(m)) continue;
+          final parts = chunks(m['text'] as String);
+          var done = _db!.select('SELECT COUNT(*) AS n FROM chunks WHERE module_id = ?', [m['id']]).first['n'] as int;
+          while (done < parts.length) {
+            final batch = parts.sublist(done, done + 16 > parts.length ? parts.length : done + 16);
+            final vectors = await brain.embedChunks(batch);
+            // Deleted meanwhile (or Gamy closed): stop reading it.
+            if (_db == null || !subjects.contains(s) || !(s['modules'] as List).contains(m)) break;
+            for (var i = 0; i < batch.length; i++) {
+              _db!.execute('INSERT INTO chunks (module_id, text, vec) VALUES (?, ?, ?)',
+                  [m['id'], batch[i], vectorBytes(vectors[i])]);
+            }
+            done += batch.length;
+          }
+          if (done >= parts.length) _read.add(m);
+        }
+      }
+    } catch (e) {
+      debugPrint('Smart search reading stopped: $e'); // tried again next time Gamy searches
+    } finally {
+      _indexing = false;
     }
   }
 }

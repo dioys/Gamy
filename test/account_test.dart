@@ -83,6 +83,42 @@ void main() {
     expect(store.subjects.first['modules'], hasLength(1));
   });
 
+  // Nov 22: changing account takes the old account's lessons off this device (they're safe online), so two
+  // people's lessons never mix. Nothing else changes.
+  test('changing account clears this device\'s lessons and scores, but keeps the settings', () async {
+    store.agree();
+    store.setLang(); // Filipino (saved)
+    store.addSubject('Science');
+    store.restoreModule(store.subjects.single, 'Cells.pdf', 'A cell is the basic unit of life.');
+    store.addScore(store.subjects.single, {'module': 'Cells.pdf', 'type': 'id', 'right': 1, 'total': 1, 'date': 'd'});
+    store.clearLessons();
+    expect(store.subjects, isEmpty);
+    await store.load(); // still empty after reopening
+    expect(store.subjects, isEmpty);
+    expect(store.agreedTo, isNotNull, reason: 'no new terms screen');
+    expect(store.lang, 'fil');
+    store.lang = 'en';
+  });
+
+  test('changing account also starts Chat and Quiz over (a new "fresh" number for them)', () {
+    final before = store.fresh;
+    store.clearLessons();
+    expect(store.fresh, before + 1);
+  });
+
+  // Nov 23: after adding a subject the student had to tap it before uploading. Now it opens right away
+  // (the file picker opens too; in tests there's no picker, which Gamy handles quietly).
+  testWidgets('a new subject is open right away, with its upload button', (tester) async {
+    await tester.pumpWidget(const MaterialApp(home: Scaffold(body: Upload())));
+    await tester.tap(find.text(store.t('add_subject')));
+    await tester.pumpAndSettle();
+    await tester.enterText(find.byType(TextField), 'Algebra');
+    await tester.tap(find.text(store.t('add')));
+    await tester.pumpAndSettle();
+    expect(store.subjects.single['name'], 'Algebra');
+    expect(find.text(store.t('add_module')), findsOneWidget, reason: 'no extra tap on the subject');
+  });
+
   group('notices', () {
     testWidgets('Settings says lessons are device-only and offers Google sign-in', (tester) async {
       await tester.pumpWidget(const MaterialApp(home: Settings()));
@@ -94,6 +130,7 @@ void main() {
       expect(find.text(store.t('account_off')), findsOneWidget);
       expect(find.text(store.t('sign_in')), findsOneWidget);
       expect(find.text(store.t('delete_account')), findsNothing, reason: 'only when signed in');
+      expect(find.text(store.t('change_account')), findsNothing, reason: 'only when signed in');
     });
 
     testWidgets('the Upload tab warns that lessons are lost on reinstall or another device', (tester) async {

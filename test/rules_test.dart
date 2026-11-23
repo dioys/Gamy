@@ -180,7 +180,8 @@ void main() {
 
     test('identification: the question shows the meaning, the answer is its term', () {
       for (final m in localItems(sample, 'id', 100)) {
-        final meaning = RegExp(r'"(.*)"').firstMatch(m['q'])![1];
+        final meaning = meaningOf(m['q']);
+        expect(m['q'], '$meaning.', reason: 'Nov 22: just the description, no "What is being described?"');
         expect(facts[meaning], m['answer']);
         expect(m['hint'], startsWith('Starts with "${(m['answer'] as String)[0].toUpperCase()}"'));
       }
@@ -202,7 +203,7 @@ void main() {
 
     test('Filipino texts are used when the language is Filipino', () {
       store.lang = 'fil';
-      expect(localItems(sample, 'id', 1).single['q'], startsWith('Ano ang inilalarawan?'));
+      expect(localItems(sample, 'id', 1).single['hint'], startsWith('Nagsisimula sa'));
     });
   });
 
@@ -313,6 +314,41 @@ void main() {
       final lines = bestLines('cache memory processor', modules, 2)!;
       expect(lines, hasLength(2));
       expect(lines.first.text, startsWith('Cache memory'));
+    });
+  });
+
+  // Nov 23: a big algebra book gave the question "...left to Problems 32–36 at the end of the chapter".
+  test('lines that only point to other parts of the book never become questions', () {
+    const text = 'The details are left to Problems 32–36 at the end of the chapter.\n'
+        'The proof is shown in Figure 4 on the next page.\n'
+        'The kernel is the set of elements that a homomorphism sends to the identity.\n';
+    final items = localItems(text, 'id', 10);
+    expect(items, hasLength(1));
+    expect(items.single['answer'], 'kernel');
+  });
+
+  // Nov 23: chat showed "$ p^a q^b $"; math now reads like math, with real exponents.
+  group('math that reads well', () {
+    test(r'no $ signs or LaTeX words, and real exponents', () {
+      expect(cleanReply(r'order $ p^a q^b $ (where $ p, q $ are prime and $ a + b > 1 $)'),
+          'order pᵃ qᵇ (where p, q are prime and a + b > 1)');
+      expect(mathText(r'\(x^2 + y^{n+1} = \frac{1}{2}\) and a \cdot b \leq c'), 'x² + yⁿ⁺¹ = (1)/(2) and a · b ≤ c');
+      expect(mathText('x_1 + x_2 = 5, but file_2 stays'), 'x₁ + x₂ = 5, but file_2 stays');
+    });
+
+    // Nov 23: a long reply still showed "$$ \begin{bmatrix} ... $$", "\cdots", "\phi" and a lone "$".
+    test(r'matrices, Greek letters and a "$" left alone are cleaned too', () {
+      expect(mathText('like:\n\$\$\n\\begin{bmatrix}\na_{11} & a_{12} \\\\\na_{21} & a_{22}\n\\end{bmatrix}\n\$\$\nok'),
+          'like:\n[a₁₁ a₁₂]\n[a₂₁ a₂₂]\nok');
+      expect(mathText(r'a^1 y_1 + \cdots + a^n y_n = \phi(x), then $ \phi(2) = 3^1 +'),
+          'a¹ y₁ + ⋯ + aⁿ yₙ = φ(x), then φ(2) = 3¹ +');
+      expect(mathText(r"print('a\nb') costs $5"), r"print('a\nb') costs $5");
+    });
+
+    test('money and things without a small version are left alone', () {
+      expect(mathText(r'It costs $5 and $10.'), r'It costs $5 and $10.');
+      expect(powers('x^2.5 and p^q'), 'x^2.5 and p^q', reason: 'no small "." or "q": shown as typed, never wrong');
+      expect(powers('e^(-x) and 2^10'), 'e⁻ˣ and 2¹⁰');
     });
   });
 }

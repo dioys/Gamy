@@ -27,6 +27,38 @@ Parallel: R_P = R1 R2 / (R1 + R2)
 y = 2x^2 + 3x - 5
 ''';
 
+// A piece of Numerical Methods Module 3 (Part III), as Gamy's PDF reader saves it: the general form (letters,
+// not numbers), worked examples, the answers written as "x = 2", a repeated example and a reordered one.
+const _module3 = '''
+Jacobi Method and Gauss-Seidel Method
+a11x1 + a12x2 + a13x3 + a14x4 = b1 x1 =\r
+a21x1 + a22x2 + a23x3 + a24x4 = b2 x2 =\r
+Example 2: Solve the system of equations using the Jacobi Method.\r
+3x − 2y + z = 11\r
+x − 3y + 2z = 11\r
+2x + y − 4z = −9\r
+Obtain the final answer to one decimal place. Use absolute relative error d k ≤ 0.001.\r
+x = 2\r
+y = −1\r
+z = 3\r
+Example 3: Solve the following system of equations using Gauss-Seidel method.\r
+45x1 + 2x2 + 3x3 = 58\r
+−3x1 + 22x2 + 2x3 = 47\r
+5x1 + x2 + 20x3 = 67\r
+Obtain the final answers to two decimal places. Use absolute relative error d k ≤ 0.0001.\r
+Example 4: the same system as Example 2.\r
+3x − 2y + z = 11\r
+x − 3y + 2z = 11\r
+2x + y − 4z = −9\r
+Example 5:\r
+x + 4y − 2z = −2\r
+2x + 3y + 8z = 39\r
+5x + y + 2z = 19\r
+3.) Use (x)0 = { 0, 0 }.\r
+x1 − 5x2 = −4\r
+7x1 − x2 = 6\r
+''';
+
 void main() {
   setUp(() => store.lang = 'en');
 
@@ -48,6 +80,34 @@ void main() {
       expect(f['V'], ['I', 'R']);
       expect(f['R_T'], ['R1', 'R2', 'R3']);
       expect(f['E'], ['m', 'c']);
+    });
+
+    // Nov 23: a proof book's "L1 = p1L" (joining maps) became "find p1 when L = 11".
+    test('equations inside proofs are not number formulas', () {
+      final text = 'Suppose that L1 : U → V1 and L2 : U → V2 are linear maps. We recover L1 from L by L1 = p1L.\n'
+          '${'Groups are studied in this book. ' * 10}\n'
+          "Ohm's law states that V = I x R, where V is voltage.";
+      expect(formulas(text).map((f) => f.text), ['V = I x R']);
+    });
+
+    // Nov 23: the algebra book still gave "Using k = m + 1, find m when k = 9" from its proofs.
+    test('a proof book says so instead of making letter "problems"', () {
+      final book = List.filled(40, 'Theorem 3. Let k = m + 1. Prove that the map L : U → V is an isomorphism.').join('\n');
+      expect(proofBook(book), isTrue);
+      expect(() => solveItems(book, 10), throwsA('proof_book'));
+      expect(proofBook("A proof is shown. Ohm's law: V = I x R."), isFalse, reason: 'one word is not a proof book');
+      expect(store.t('proof_book'), isNot(contains('{')));
+    });
+
+    // Nov 23: 50 problems from a 700-page book all came from its first 10%.
+    test('problems come from the whole module, not just its first pages', () {
+      final text = [for (var i = 1; i <= 100; i++) 'Rule $i says Q$i = R$i x S$i, where Q is a quantity.'].join('\n');
+      final used = {
+        for (final m in solveItems(text, 10)) int.parse(RegExp(r'Q(\d+) =').firstMatch(m['q'] as String)![1]!)
+      };
+      expect(used.where((i) => i <= 50), isNotEmpty);
+      expect(used.where((i) => i > 50), isNotEmpty);
+      expect(used, hasLength(10), reason: '10 different formulas, spread out');
     });
 
     test('"y = f(x)" is function notation, not "f times x"', () {
@@ -234,6 +294,91 @@ void main() {
     test('Filipino questions', () {
       store.lang = 'fil';
       expect(solveItems(_module, 1).single['q'], startsWith('Gamit ang '));
+    });
+  });
+
+  // Nov 22: Module 3 (systems of linear equations) gave no problems at all. Now it gets Jacobi and
+  // Gauss-Seidel problems, solved like the module's own examples.
+  group('systems of equations (Jacobi, Gauss-Seidel)', () {
+    test("finds the module's systems once each, and nothing else", () {
+      final found = systems(_module3);
+      expect([for (final s in found) s.vars], [
+        ['x', 'y', 'z'],
+        ['x1', 'x2', 'x3'],
+        ['x', 'y', 'z'],
+        ['x1', 'x2'],
+      ], reason: 'not the a11x1 general form, not the "x = 2" answers, and Example 4 only once');
+      expect(found[0].a, [
+        [3, -2, 1],
+        [1, -3, 2],
+        [2, 1, -4],
+      ]);
+      expect(found[0].b, [11, 11, -9]);
+      expect(found[0].tol, 0.001);
+      expect(found[1].tol, 0.0001, reason: "each system keeps its own stopping rule");
+    });
+
+    List<double> round4(List<double> x) => [for (final v in x) double.parse(v.toStringAsFixed(4))];
+
+    test("Jacobi matches the module's Example 2", () {
+      final rows = iterateSystem('jacobi', systems(_module3)[0])!;
+      expect(round4(rows[1].x), [3.6667, -3.6667, 2.25]);
+      expect(rows.last.d, lessThanOrEqualTo(0.001));
+      for (final (v, want) in [(rows.last.x[0], 2.0), (rows.last.x[1], -1.0), (rows.last.x[2], 3.0)]) {
+        expect(v, closeTo(want, 0.01));
+      }
+    });
+
+    test("Gauss-Seidel matches the module's Example 3", () {
+      final rows = iterateSystem('seidel', systems(_module3)[1])!;
+      expect(round4(rows[1].x), [1.2889, 2.3121, 2.9122]);
+      expect(round4(rows[2].x), [0.992, 2.0069, 3.0017]);
+      expect(round4(rows.last.x), [1, 2, 3]);
+    });
+
+    test('new practice systems always work out to whole-number answers', () {
+      for (var i = 0; i < 50; i++) {
+        final s = practiceSystem();
+        for (final m in ['jacobi', 'seidel']) {
+          for (final v in iterateSystem(m, s)!.last.x) {
+            expect(v, closeTo(v.roundToDouble(), 0.02), reason: '$m $s');
+          }
+        }
+      }
+    });
+
+    test('problems ask about both methods, each with its full solution and the answer inside it', () {
+      final items = solveItems(_module3, 500);
+      expect(items.map((m) => m['topic']).toSet(), {'Jacobi method', 'Gauss–Seidel method'});
+      for (final m in items) {
+        expect(m['type'], 'solve');
+        expect(m['q'], anyOf(contains('Jacobi method'), contains('Gauss-Seidel method')));
+        final why = m['why'] as String;
+        for (final part in ['sys_rewrite', 'sys_table', 'sys_answer']) {
+          expect(why, contains(store.t(part).split('{').first), reason: part);
+        }
+        expect(why, contains(m['answer']), reason: 'the answer is in the solution table');
+        expect(numberOk(m['answer'], m['answer']), isTrue);
+      }
+    });
+
+    test('Example 5 is put in a working order first, and the solution says so', () {
+      final items = systemItems('Jacobi method\n${_module3.split('Example 5:\r\n')[1].split('3.)').first}', practice: 0);
+      expect(items, isNotEmpty);
+      expect(items.first['why'], contains(store.t('sys_order')));
+      expect(items.first['q'], contains('x + 4y − 2z = −2'), reason: 'the question shows the system as written');
+    });
+
+    test('a big book that names Jacobi only in passing gets no Jacobi problems (Nov 23, algebra book)', () {
+      final book = '${'Groups, rings and fields are studied in this chapter. ' * 4000}'
+          'The Jacobi identity holds. Jacobi also studied elliptic functions.\n'
+          '3x − 2y + z = 11\nx − 3y + 2z = 11\n2x + y − 4z = −9\n';
+      expect(systemItems(book), isEmpty);
+      expect(systemItems(_module3), isNotEmpty, reason: 'Module 3 really teaches it');
+    });
+
+    test('a module that never names the methods gets no system problems', () {
+      expect(systemItems('3x − 2y + z = 11\nx − 3y + 2z = 11\n2x + y − 4z = −9'), isEmpty);
     });
   });
 
