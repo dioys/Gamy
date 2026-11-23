@@ -29,6 +29,7 @@ dev_dependencies:
   flutter_test:
     sdk: flutter
   # Only for tests: lets them save to a temporary folder instead of your real Gamy data
+  msix: ^3.18.0
   path_provider_platform_interface: ^2.1.2
   plugin_platform_interface: ^2.1.8
 
@@ -49,3 +50,18 @@ flutter:
   uses-material-design: true
   assets:
     - assets/gamy/
+
+# Microsoft Store package (dart run msix:create). The identity must match Partner Center exactly:
+# Product management -> Product identity. Raise msix_version with every Store update.
+msix_config:
+  display_name: "Gamy: Study Bear"
+  publisher_display_name: Gamy
+  identity_name: Gamy.GamyStudyBear
+  publisher: CN=CEA3B406-F439-4B4B-B86C-B5D32B0E64FB
+  msix_version: 1.0.0.0
+  logo_path: assets/gamy/head.png
+  capabilities: internetClient
+  languages: en-us, fil-ph
+  store: true
+  # the Windows sign-in key and the crash-report key, read from the private desktop_client.json
+  windows_build_args: --dart-define-from-file=desktop_client.json
