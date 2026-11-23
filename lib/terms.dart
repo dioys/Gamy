@@ -1,9 +1,9 @@
 // Change termsVersion whenever the text changes in an important way:
 // everyone will be asked to agree again.
-const termsVersion = '2026-11-22b';
+const termsVersion = '2026-11-23';
 
 const termsText = '''GAMY TERMS OF USE AND PRIVACY POLICY
-Effective date: November 22, 2026
+Effective date: November 23, 2026
 
 These Terms of Use and Privacy Policy ("Agreement") form a binding agreement between you ("you", "the User") and the developer of Gamy ("we", "us"). By ticking the box below and selecting "Agree and continue", you confirm that you have read, understood and accepted this Agreement. If you do not accept it, you may not use Gamy.
 
@@ -21,11 +21,12 @@ These Terms of Use and Privacy Policy ("Agreement") form a binding agreement bet
 
 4. PRIVACY
 4.1 Information kept on your device. Your subjects, modules, quizzes, scores, chats and settings are stored on your device. Deleting a module, a subject or the application removes them from the device, and "Delete all my data" in Settings removes all of them at once.
-4.2 No selling or tracking. We do not sell, rent or share your personal information. Gamy contains no advertising, analytics or tracking tools.
+4.2 No selling or tracking. We do not sell, rent or share your personal information. Gamy contains no advertising, analytics or tracking tools. Crash reports (Section 4.7) are used only to fix errors.
 4.3 Photos. Photos of modules are read on your device; only the text found in them is kept.
 4.4 Optional AI models. If you choose to download them (when you first open Gamy or in Settings), AI models are downloaded once from Hugging Face: Qwen3 (Apache 2.0 license), Gamy's brain, which writes answers, and, separately, EmbeddingGemma, which powers smart search. Only the download requests leave your device. EmbeddingGemma is provided under and subject to the Gemma Terms of Use found at ai.google.dev/gemma/terms.
 4.5 Wikipedia lookups. When you are online and your modules do not contain the answer to a chat question, or to explain an incorrect quiz answer, Gamy may send the search words (your question or the quiz term) to Wikipedia and display a short excerpt with its source. Your modules and personal details are never sent. Wikipedia's privacy policy applies to those searches, and its content may contain errors.
-4.6 Reports. If you use the Report function on a quiz question, a Google Form opens with that question filled in. Nothing is sent unless you submit the form.
+4.6 Reports. If you use the Report function on a quiz question or a reply from Gamy, your email application opens with that content filled in, addressed to us. Nothing is sent unless you send the email yourself.
+4.7 Crash reports. When Gamy crashes or meets an unexpected error, a crash report is sent to Sentry (Functional Software, Inc.), our error-monitoring service, so we can fix it. It contains the type of error, where it happened in Gamy's code, Gamy's version, and your device model and operating system version. It does not contain your name, email address, account, modules, chats, quiz answers, screenshots or your IP address as personal data. Crash reports are kept for a limited period and then deleted. Sentry's privacy policy applies to that service.
 
 5. GOOGLE SIGN-IN AND YOUR ACCOUNT
 5.1 Signing in is optional. Without an account, your lessons are stored only on your device and cannot be recovered if you reinstall Gamy or use another device.

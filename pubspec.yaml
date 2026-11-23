@@ -20,6 +20,7 @@ dependencies:
   llamadart: ^0.19.11
   path_provider: ^2.1.6
   pdfrx: ^2.12.0
+  sentry_flutter: ^10.6.0
   sqlite3: ^3.9.1 # the device database (bundles SQLite itself on Android and Windows)
   url_launcher: ^6.3.3
 

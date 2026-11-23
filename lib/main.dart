@@ -1,5 +1,6 @@
 import 'package:flutter/material.dart';
 import 'package:pdfrx/pdfrx.dart';
+import 'package:sentry_flutter/sentry_flutter.dart';
 
 import 'account.dart';
 import 'brain.dart';
@@ -17,7 +18,32 @@ void main() async {
   await store.load();
   await account.start(); // Firebase (optional Google account); Gamy works without it
   brain.start(); // loads Gamy's brain in the background if it was downloaded before
-  runApp(const GamyApp());
+  if (_crashReports.isEmpty) {
+    runApp(const GamyApp()); // tests and builds without the key: no crash reports
+    return;
+  }
+  await SentryFlutter.init(crashReportOptions, appRunner: () => runApp(SentryWidget(child: const GamyApp())));
+}
+
+// ----- Crash reports (Sentry) -----
+// Only when Gamy crashes or hits an error nobody caught: what went wrong, where in Gamy's code, Gamy's version
+// and the device model / Windows or Android version. No name, email, account, lessons, chats or answers:
+// no personal details, no screenshots, no screen layout, no trail of what the student tapped or typed,
+// no speed tracking. The key comes from the build file (like the Windows sign-in key), never from the code.
+const _crashReports = String.fromEnvironment('SENTRY_DSN');
+
+void crashReportOptions(SentryFlutterOptions o) {
+  o.dsn = _crashReports;
+  o.sendDefaultPii = false; // no IP address, user or device names
+  o.attachScreenshot = false;
+  o.attachViewHierarchy = false;
+  o.tracesSampleRate = 0; // no speed tracking
+  o.beforeBreadcrumb = (crumb, hint) => null; // no trail of taps, screens, network calls or log lines
+  o.beforeSend = (event, hint) {
+    event.user = null;
+    event.serverName = null; // the computer's name
+    return event;
+  };
 }
 
 class GamyApp extends StatefulWidget {

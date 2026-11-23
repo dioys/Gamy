@@ -27,5 +27,13 @@
       "port": 8080
     },
     "singleProjectMode": true
+  },
+  "hosting": {
+    "public": "site",
+    "ignore": [
+      "firebase.json",
+      "**/.*"
+    ],
+    "cleanUrls": true
   }
 }
