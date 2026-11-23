@@ -436,6 +436,8 @@ void main() {
       expect(find.textContaining('main circuit board'), findsWidgets);
       // Nov 22: without the brain he says how to get it (where to tap), once per chat.
       expect(find.textContaining(t('chat_needs_brain')), findsOneWidget);
+      // Nov 23: his reply can be reported (Google Play rule for AI-made content).
+      expect(find.byTooltip(t('report')), findsOneWidget);
 
       // Not in any module, and tests have no internet: Gamy says it's not there and he can't look it up.
       await tester.enterText(find.byType(TextField), 'photosynthesis chlorophyll');

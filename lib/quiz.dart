@@ -1,8 +1,8 @@
 import 'package:flutter/material.dart';
 import 'package:flutter/services.dart';
-import 'package:url_launcher/url_launcher.dart';
 
 import 'brain.dart';
+import 'contact.dart';
 import 'gamy.dart';
 import 'paywall.dart';
 import 'rules.dart';
@@ -21,10 +21,6 @@ class Q {
 
 // Quiz types that need Gamy Pro (free: multiple choice, true or false, identification).
 const _proTypes = {'fill', 'match', 'mix', 'solve'};
-
-// Paste your Google Form's pre-filled link here, with the word QUESTION where the details go.
-// While it's empty, the Report button stays hidden.
-const reportForm = '';
 
 // Gamy's verdict on the score, by band: high (80% and up), middle (50% and up), low (below 50%).
 // 50 lines per language (17 / 16 / 17), picked at random. No mercy for the score, never for the person.
@@ -478,14 +474,13 @@ class _QuizState extends State<Quiz> {
               Text(cleanReply(more[i]!.text), style: const TextStyle(fontSize: 12)),
             ],
           ],
-          if (review && reportForm.isNotEmpty)
+          if (review)
             Align(
               alignment: Alignment.centerRight,
               child: TextButton.icon(
                 icon: const Icon(Icons.flag_outlined, size: 18),
                 label: Text(t('report')),
-                onPressed: () => launchUrl(Uri.parse(reportForm.replaceFirst('QUESTION',
-                    Uri.encodeComponent('${q.q}\nGamy\'s answer: ${q.answer}\nExplanation: ${q.why}')))),
+                onPressed: () => report(context, '${q.q}\nGamy\'s answer: ${q.answer}\nExplanation: ${q.why}'),
               ),
             ),
         ]),

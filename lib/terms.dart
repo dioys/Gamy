@@ -56,4 +56,4 @@ Certain features may be offered through a paid subscription ("Gamy Pro"). Prices
 We may update this Agreement. If the changes are material, Gamy will ask you to review and accept the updated Agreement before continuing.
 
 12. CONTACT
-(Contact details to be added before release.)''';
+For questions, requests about your personal information under Section 6, or to report content, email gamyd022@gmail.com.''';

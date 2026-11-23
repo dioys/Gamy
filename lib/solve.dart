@@ -535,9 +535,179 @@ List<Map> systemItems(String text, {int practice = 2}) {
   return out..shuffle(_rng);
 }
 
+// ----- Successive substitution (fixed-point iteration): Module 2 -----
+// f(x) = 0 is written as x = g(x), then x(k+1) = g(x(k)) until d ≤ 0.0001 (d = |new − old| ÷ |new|).
+// Gamy tries the rewrites the module uses, and keeps the first that settles on the root (|g′(x₀)| < 1):
+//   1. solve the "x" term:           x³ − 3x + 1 = 0  ->  x = (x³ + 1) / 3
+//   2. solve the highest power:      x³ − 3x + 1 = 0  ->  x = (3x − 1)^(1/3)
+//   3. take x out of the x terms:    x³ + 2x² + 10x − 20 = 0  ->  x = 20 / (x² + 2x + 10)
+const _ssPattern = r'successive substitution|successive approximation|fixed[- ]point iteration';
+
+// "x^3 − 3x + 1" -> [(1, 'x^3'), (-1, '3x'), (1, '1')]; signs inside brackets or after ^ * / are not split.
+List<(int, String)> _terms(String math) {
+  final s = math.replaceAll(RegExp(r'[−–]'), '-'), out = <(int, String)>[];
+  var depth = 0, sign = 1, start = 0;
+  for (var i = 0; i < s.length; i++) {
+    final c = s[i];
+    if (c == '(') depth++;
+    if (c == ')') depth--;
+    if (depth != 0 || (c != '+' && c != '-')) continue;
+    final before = s.substring(0, i).trimRight();
+    if (before.isEmpty) {
+      sign = c == '-' ? -1 : 1;
+      start = i + 1;
+      continue;
+    }
+    if ('^*/('.contains(before[before.length - 1])) continue;
+    out.add((sign, s.substring(start, i).trim()));
+    sign = c == '-' ? -1 : 1;
+    start = i + 1;
+  }
+  out.add((sign, s.substring(start).trim()));
+  return out;
+}
+
+String _joinTerms(List<(int, String)> ts) {
+  final b = StringBuffer();
+  for (final (sign, body) in ts) {
+    b.write(b.isEmpty ? (sign < 0 ? '−$body' : body) : (sign < 0 ? ' − $body' : ' + $body'));
+  }
+  return b.toString();
+}
+
+// A term "3x", "x", "2x^2": (coefficient, power); a plain number has power 0. Null for anything else.
+(double, int)? _poly(String body, String x) {
+  final m = RegExp('^(\\d+(?:\\.\\d+)?)?\\s*\\*?\\s*$x(?:\\^(\\d+))?\$').firstMatch(body);
+  if (m != null) return (m[1] == null ? 1 : double.parse(m[1]!), m[2] == null ? 1 : int.parse(m[2]!));
+  final n = double.tryParse(body);
+  return n == null ? null : (n, 0);
+}
+
+double _rootOf(double v, int n) =>
+    n.isOdd ? (v < 0 ? -pow(-v, 1 / n).toDouble() : pow(v, 1 / n).toDouble()) : (v < 0 ? double.nan : pow(v, 1 / n).toDouble());
+
+// The rewrites x = g(x) of f: (text, g).
+List<(String, double Function(double))> _rewrites(Formula f) {
+  final x = f.inputs.single, math = f.text.substring(f.text.indexOf('=') + 1).trim(), ts = _terms(math);
+  double y(double v) => f.calc({x: v});
+  final out = <(String, double Function(double))>[];
+  final polys = <(double, int)?>[
+    for (final (sign, body) in ts)
+      if (_poly(body, x) case (final c, final n)) (sign * c, n) else null
+  ];
+  String over(List<(int, String)> rest, double c) {
+    // x = −rest / c, written without double minus signs
+    final shown = c < 0 ? rest : [for (final (s, b) in rest) (-s, b)];
+    final top = _joinTerms(shown), d = c.abs();
+    return d == 1 ? top : '${shown.length > 1 ? '($top)' : top} / ${fmt(d)}';
+  }
+
+  // 1. the plain "x" term
+  final lin = [for (var i = 0; i < ts.length; i++) if (polys[i]?.$2 == 1) i];
+  if (lin.length == 1) {
+    final c = polys[lin.single]!.$1, rest = [...ts]..removeAt(lin.single);
+    out.add((over(rest, c), (v) => -(y(v) - c * v) / c));
+  }
+  // 2. the highest power (when every term is a plain power or number)
+  if (polys.every((p) => p != null)) {
+    final top = [for (var i = 0; i < ts.length; i++) i]..sort((a, b) => polys[b]!.$2.compareTo(polys[a]!.$2));
+    final i = top.first, a = polys[i]!.$1, n = polys[i]!.$2;
+    if (n >= 2) {
+      final rest = [...ts]..removeAt(i);
+      out.add(('(${over(rest, a)})^(1/$n)', (v) => _rootOf(-(y(v) - a * pow(v, n)) / a, n)));
+    }
+    // 3. x taken out of every x term: x = −k / (the x terms ÷ x)
+    final consts = [for (var j = 0; j < ts.length; j++) if (polys[j]!.$2 == 0) j];
+    if (consts.length == 1 && polys[consts.single]!.$1 != 0) {
+      final k = polys[consts.single]!.$1;
+      final inner = [
+        for (var j = 0; j < ts.length; j++)
+          if (j != consts.single)
+            (polys[j]!.$1 < 0 ? -1 : 1,
+                '${polys[j]!.$1.abs() == 1 && polys[j]!.$2 > 1 ? '' : fmt(polys[j]!.$1.abs())}${polys[j]!.$2 == 2 ? x : polys[j]!.$2 > 2 ? '$x^${polys[j]!.$2 - 1}' : ''}')
+      ];
+      out.add(('${k < 0 ? '' : '−'}${fmt(k.abs())} / (${_joinTerms(inner)})', (v) => -k * v / (y(v) - k)));
+    }
+  }
+  return out;
+}
+
+typedef SsRow = ({double x, double next, double d});
+
+// The iteration table from x0, or null if it doesn't settle within 100 steps.
+List<SsRow>? ssTable(double Function(double) g, double x0, {double tol = 0.0001}) {
+  final rows = <SsRow>[];
+  var x = x0;
+  for (var k = 0; k < 100; k++) {
+    final next = g(x);
+    if (!next.isFinite) return null;
+    final d = (next - x).abs() / (next == 0 ? 1 : next.abs());
+    rows.add((x: x, next: next, d: d));
+    if (d <= tol) return rows;
+    x = next;
+  }
+  return null;
+}
+
+double _slope(double Function(double) g, double x) => (g(x + 1e-5) - g(x - 1e-5)) / 2e-5;
+
+// Problems for every root of every module function between two whole numbers (-10 to 10).
+List<Map> successiveItems(String text) {
+  final t = store.t, out = <Map>[];
+  if (!_teaches(text, _ssPattern)) return out;
+  for (final f in functions(text)) {
+    final forms = _rewrites(f);
+    double y(double v) => f.calc({f.inputs.single: v});
+    for (var a = -10; a < 10; a++) {
+      final ya = y(a.toDouble()), yb = y(a + 1.0);
+      if (!ya.isFinite || !yb.isFinite || ya * yb >= 0) continue;
+      // The first rewrite and start (a, a+1, a+0.5) with |g′(x₀)| < 1 that settles on this root.
+      (String, double, double, List<SsRow>)? pick;
+      for (final (shown, g) in forms) {
+        for (final x0 in [a.toDouble(), a + 1.0, a + .5]) {
+          final s = _slope(g, x0);
+          if (!(s.abs() < 1)) continue;
+          final rows = ssTable(g, x0);
+          if (rows == null || rows.length < 3 || rows.last.next < a - 1e-3 || rows.last.next > a + 1 + 1e-3) continue;
+          pick = (shown, x0, s, rows);
+          break;
+        }
+        if (pick != null) break;
+      }
+      if (pick == null) continue;
+      final (shown, x0, s, rows) = pick;
+      String d4(double v) => v.toStringAsFixed(4);
+      final parts = {'m': t('m_successive'), 'f': f.text, 'g': shown, 'x0': fmt(x0), 'r': d4(rows.last.next)};
+      String why(int? mark) {
+        String c(Object v) => (v is double ? v.toStringAsFixed(4) : '$v').padLeft(10);
+        final table = ['  k${c('x(k)')}${c('x(k+1)')}${c('d')}  ${t('sys_remark')}'];
+        for (var k = 0; k < rows.length; k++) {
+          final r = rows[k];
+          table.add('${'$k'.padLeft(3)}${c(r.x)}${c(r.next)}${c(r.d)}  '
+              '${t(k == rows.length - 1 ? 'sys_stop' : 'sys_go')}${k == mark ? '  <-' : ''}');
+        }
+        return [
+          _fill(t('m_sol'), parts),
+          _fill(t('ss_rewrite'), parts),
+          _fill(t('ss_check'), {...parts, 's': s.abs().toStringAsFixed(3)}),
+          table.join('\n'),
+          _fill(t('m_stop'), parts),
+        ].join('\n');
+      }
+
+      final item = {'type': 'solve', 'hint': _fill(t('ss_hint'), parts), 'topic': 'Fixed-point iteration'};
+      for (final k in [1, 2, 3]) {
+        out.add({...item, 'q': _fill(t('ss_step'), {...parts, 'k': '$k'}), 'answer': d4(rows[k - 1].next), 'why': why(k - 1)});
+      }
+      out.add({...item, 'q': _fill(t('ss_root'), parts), 'answer': d4(rows.last.next), 'why': why(rows.length - 1)});
+    }
+  }
+  return out;
+}
+
 List<Map> solveItems(String text, int count) {
   // A numerical-methods module gets problems on its own methods; other modules get formula problems.
-  final methods = [...methodItems(text), ...systemItems(text)]..shuffle(_rng);
+  final methods = [...methodItems(text), ...systemItems(text), ...successiveItems(text)]..shuffle(_rng);
   if (methods.isNotEmpty) return methods.take(count).toList();
   if (proofBook(text)) throw 'proof_book';
   final all = [...formulas(text), ...functions(text)];

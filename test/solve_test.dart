@@ -156,7 +156,9 @@ void main() {
       final items = solveItems(text, 100);
       expect(items, isNotEmpty);
       for (final m in items) {
-        expect(m['q'], contains('false position method'), reason: 'only the method this module names');
+        // Nov 23: this module also teaches successive substitution, so its problems come too.
+        expect(m['q'], anyOf(contains('false position method'), contains('successive substitution method')),
+            reason: 'only the methods this module names');
         expect(m['q'], isNot(contains('f(x) = x,')), reason: 'never the useless "f(x) = x"');
       }
     });
@@ -379,6 +381,57 @@ void main() {
 
     test('a module that never names the methods gets no system problems', () {
       expect(systemItems('3x − 2y + z = 11\nx − 3y + 2z = 11\n2x + y − 4z = −9'), isEmpty);
+    });
+  });
+
+  // Nov 23: Module 2 teaches successive substitution, but Gamy made no problems for it.
+  group('successive substitution (Module 2)', () {
+    const module2 = 'The Successive Substitution Method. Given f(x) = 0, rewrite it as x = g(x).\n'
+        'Example 1.) Find a root of an equation f(x) = e\n−x − x using Successive Substitution method.\n'
+        'Example 2.) Find the roots of an equation f(x) = x\n3 − 3x + 1 using Successive Substitution method.\n'
+        '2.) Find the roots of f(x) = x\n3 + 2x\n2 + 10x − 20 using the successive substitution method.';
+    late List<Map> items;
+    setUp(() {
+      store.lang = 'en';
+      items = successiveItems(module2);
+    });
+    Map root(String g) => items.firstWhere((m) => (m['q'] as String).contains('x = $g') && (m['q'] as String).contains('find the root'));
+
+    test("matches the module's Example 1: x = e^(-x) from x0 = 1", () {
+      final step1 = items.firstWhere((m) => (m['q'] as String).contains('x = e^(-x)') && (m['q'] as String).contains('iteration 1'));
+      expect(step1['q'], contains('x0 = 1'));
+      expect(step1['answer'], '0.3679');
+      expect(numberOk('0.567', root('e^(-x)')['answer']), isTrue);
+      expect(step1['why'], contains('|g′(1)| = 0.368 < 1'));
+    });
+
+    test("Example 2 uses the module's two rewrites, and finds all three roots", () {
+      expect(numberOk('0.347', root('(x^3 + 1) / 3')['answer']), isTrue);
+      // This rewrite finds two roots (-1.8794 and 1.5321): the module's is 1.532.
+      final cubeRoot = [
+        for (final m in items)
+          if ((m['q'] as String).contains('x = (3x − 1)^(1/3)') && (m['q'] as String).contains('find the root')) m['answer']
+      ];
+      expect(cubeRoot.any((a) => numberOk('1.532', a)), isTrue, reason: '$cubeRoot');
+      final roots = [for (final m in items) if ((m['q'] as String).contains('x^3 − 3x + 1') && (m['q'] as String).contains('find the root')) m];
+      expect(roots, hasLength(3), reason: 'roots near -1.88, 0.35 and 1.53');
+    });
+
+    test('the assignment needs x taken out: x = 20 / (x^2 + 2x + 10)', () {
+      expect(numberOk('1.3688', root('20 / (x^2 + 2x + 10)')['answer']), isTrue);
+    });
+
+    test('every problem has its table and a solution that says when to stop', () {
+      for (final m in items) {
+        expect(m['why'], contains('x(k+1)'));
+        expect(m['why'], contains(store.t('sys_stop')));
+        expect(m['why'], contains(m['answer']));
+      }
+      expect(store.t('ss_step'), isNot(contains('{x}')));
+    });
+
+    test('a module that never teaches it gets none', () {
+      expect(successiveItems('Example: f(x) = x^3 − 3x + 1 using the bisection method.'), isEmpty);
     });
   });
 

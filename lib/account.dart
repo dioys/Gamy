@@ -43,6 +43,9 @@ List<String> textParts(String text) {
   return parts;
 }
 
+// Firestore's answer when the free plan's daily limit is used up.
+bool backupFull(Object e) => e is FirebaseException && e.code == 'resource-exhausted';
+
 class Account extends ChangeNotifier {
   bool _on = false; // Firebase started (it doesn't in tests, or when it fails)
   bool _google = false; // GoogleSignIn.initialize was called (allowed only once)
@@ -54,7 +57,11 @@ class Account extends ChangeNotifier {
     try {
       await Firebase.initializeApp(options: DefaultFirebaseOptions.currentPlatform);
       _on = true;
-      FirebaseAuth.instance.authStateChanges().listen((_) => notifyListeners());
+      FirebaseAuth.instance.authStateChanges().listen((u) {
+        notifyListeners();
+        // Changes that hit the daily limit last time go online now (a full sync only when something is behind).
+        if (u != null && store.backupBehind) _quietly(sync);
+      });
     } catch (e) {
       debugPrint('Firebase did not start: $e'); // Gamy still works, just without an account
     }
@@ -261,7 +268,13 @@ class Account extends ChangeNotifier {
 
   void _quietly(Future<void> Function() job) {
     if (user == null) return;
-    job().catchError((Object e) => debugPrint('Online copy not updated: $e'));
+    job().then((_) {
+      if (job == sync) store.setBackupBehind(false);
+    }).catchError((Object e) {
+      debugPrint('Online copy not updated: $e');
+      // The free plan's daily limit: the student is told, and it's synced at the next start.
+      if (backupFull(e)) store.setBackupBehind(true);
+    });
   }
 
   Future<void> _saveSubject(String name) async {

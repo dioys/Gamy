@@ -35,6 +35,7 @@ class Store extends ChangeNotifier {
   int uploads = 0; // modules ever uploaded; deleting doesn't give uploads back
   int weekItems = 0; // quiz items made this week
   String? weekStart; // when this week's count started
+  bool backupBehind = false; // some changes didn't reach the online copy (daily limit): synced at the next start
   bool get agreed => agreedTo == termsVersion;
   List<String> moods = ['idle', 'idle']; // Gamy's sprite in Chat, Quiz
   // In memory the same shape as before, so the screens don't change:
@@ -56,6 +57,7 @@ class Store extends ChangeNotifier {
     uploads = int.tryParse(s['uploads'] ?? '') ?? 0;
     weekItems = int.tryParse(s['weekItems'] ?? '') ?? 0;
     weekStart = s['weekStart'];
+    backupBehind = s['backupBehind'] == 'true';
     subjects = [
       for (final r in db.select('SELECT id, name FROM subjects ORDER BY id'))
         {
@@ -131,10 +133,17 @@ class Store extends ChangeNotifier {
       ('uploads', '$uploads'),
       ('weekItems', '$weekItems'),
       ('weekStart', weekStart),
+      ('backupBehind', '$backupBehind'),
     ]) {
       _db!.execute('INSERT OR REPLACE INTO settings VALUES (?, ?)', [k, v]);
     }
     notifyListeners();
+  }
+
+  void setBackupBehind(bool v) {
+    if (backupBehind == v) return;
+    backupBehind = v;
+    _save();
   }
 
   void setLang() {

@@ -3,12 +3,14 @@ import 'dart:io';
 
 import 'package:flutter/foundation.dart';
 
+import 'contact.dart';
+
 // ----- Wikipedia lookups: free, no key, online only -----
 // Used only when the student's modules don't have the answer (the module always comes first).
 // Only the search words are sent, never the modules or anything about the student.
 // Wikipedia asks every app to say who it is, with a contact, so they can reach the developer instead of
-// blocking the app. Put your email or website here before publishing.
-const _agent = 'Gamy/1.0 (study app; contact: CONTACT_EMAIL_HERE)';
+// blocking the app (see contact.dart).
+const _agent = 'Gamy/1.0 (study app; contact: $contactEmail)';
 
 typedef WikiPage = ({String title, String text});
 

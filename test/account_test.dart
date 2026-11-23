@@ -1,8 +1,11 @@
 import 'dart:io';
 
+import 'package:firebase_core/firebase_core.dart';
 import 'package:flutter/material.dart';
 import 'package:flutter_test/flutter_test.dart';
 import 'package:gamy/account.dart';
+import 'package:gamy/contact.dart';
+import 'package:gamy/terms.dart';
 import 'package:gamy/settings.dart';
 import 'package:gamy/store.dart';
 import 'package:gamy/upload.dart';
@@ -117,6 +120,28 @@ void main() {
     await tester.pumpAndSettle();
     expect(store.subjects.single['name'], 'Algebra');
     expect(find.text(store.t('add_module')), findsOneWidget, reason: 'no extra tap on the subject');
+  });
+
+  // Nov 23: Gamy's contact is filled in everywhere, and a Report opens an email with the reply in it.
+  test("Gamy's email is in the terms, and a Report email carries the reply", () {
+    expect(termsText, contains(contactEmail));
+    expect(termsText, isNot(contains('to be added')));
+    final mail = reportMail('Gamy said: a cell is a bad thing.');
+    expect(mail.scheme, 'mailto');
+    expect(mail.path, 'gamyd022@gmail.com');
+    expect(Uri.decodeComponent(mail.query), contains('Gamy said: a cell is a bad thing.'));
+  });
+
+  // Nov 23: the free plan's daily limit. The student is told, and the next start sends what was missed.
+  test('a full daily limit is noticed and remembered until the next sync', () async {
+    expect(backupFull(FirebaseException(plugin: 'cloud_firestore', code: 'resource-exhausted')), isTrue);
+    expect(backupFull(FirebaseException(plugin: 'cloud_firestore', code: 'unavailable')), isFalse);
+    expect(backupFull('offline'), isFalse);
+    store.setBackupBehind(true);
+    await store.load(); // reopen Gamy
+    expect(store.backupBehind, isTrue);
+    store.setBackupBehind(false);
+    expect(store.t('backup_paused'), isNot(contains('{')));
   });
 
   group('notices', () {

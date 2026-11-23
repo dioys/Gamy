@@ -4,6 +4,7 @@ import 'dart:math';
 import 'package:flutter/material.dart';
 
 import 'brain.dart';
+import 'contact.dart';
 import 'gamy.dart';
 import 'rules.dart';
 import 'store.dart';
@@ -144,7 +145,9 @@ class _ChatState extends State<Chat> {
               if (i != shown)
                 Align(
                   alignment: msgs[i].$1 ? Alignment.centerLeft : Alignment.centerRight,
-                  child: Container(
+                  child: GestureDetector(
+                    onLongPress: msgs[i].$1 && i > 0 ? () => report(context, msgs[i].$2) : null,
+                    child: Container(
                     margin: const EdgeInsets.symmetric(vertical: 3),
                     padding: const EdgeInsets.symmetric(horizontal: 10, vertical: 6),
                     constraints: const BoxConstraints(maxWidth: 560),
@@ -155,16 +158,29 @@ class _ChatState extends State<Chat> {
                     ),
                     child: Text(msgs[i].$2, style: const TextStyle(fontSize: 13, color: ink)), // light bubble, dark text in both modes
                   ),
+                  ),
                 ),
           ]),
         ),
         if (!tight) ...[
           ConstrainedBox(
-            // Nov 23: bigger for long replies (it scrolls inside when even this isn't enough).
-            constraints: BoxConstraints(maxWidth: 760, maxHeight: min(narrow ? 300.0 : 420.0, box.maxHeight * .45)),
+            // Nov 23: bigger for long replies on laptops (it scrolls inside when even this isn't enough).
+            // Phones keep the size that fits with the keyboard open.
+            constraints: BoxConstraints(
+                maxWidth: 760, maxHeight: narrow ? min(170.0, room) : min(420.0, box.maxHeight * .45)),
             child: Bubble(msgs[shown].$2.isEmpty ? '...' : msgs[shown].$2),
           ),
-          GestureDetector(onTap: _tapGamy, child: GamySprite(store.moods[0], size: min(narrow ? 150.0 : 230.0, room))),
+          Row(mainAxisAlignment: MainAxisAlignment.center, children: [
+            GestureDetector(onTap: _tapGamy, child: GamySprite(store.moods[0], size: min(narrow ? 150.0 : 230.0, room))),
+            // Report an offensive or wrong reply (Google Play rule for AI-made content), beside Gamy so the
+            // screen doesn't get taller. Older replies: long-press them.
+            if (!busy && shown > 0)
+              IconButton(
+                tooltip: store.t('report'),
+                icon: const Icon(Icons.flag_outlined, size: 20),
+                onPressed: () => report(context, msgs[shown].$2),
+              ),
+          ]),
         ],
         Padding(
           padding: const EdgeInsets.all(8),

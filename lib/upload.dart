@@ -117,6 +117,9 @@ class _UploadState extends State<Upload> {
             ),
           ),
         ),
+      // Nov 23: the free plan's daily limit was reached: lessons are safe here and go online later.
+      if (account.user != null && store.backupBehind)
+        Card(child: ListTile(leading: const Icon(Icons.cloud_sync_outlined), title: Text(t('backup_paused')))),
       if (!store.pro)
         Text(t('uploads_left').replaceFirst('{used}', '${store.uploads}'), style: Theme.of(context).textTheme.bodySmall),
       if (store.subjects.isEmpty) Text(t('no_subjects')),

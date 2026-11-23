@@ -152,6 +152,20 @@ void main() {
     await tester.pumpWidget(const SizedBox());
   });
 
+  testWidgets('after checking, every question can be reported by email (Nov 23)', (tester) async {
+    await start(tester, _twelve, type: 'id');
+    final fields = find.byType(TextField);
+    for (var i = 0; i < 10; i++) {
+      await tester.enterText(fields.at(i), 'router');
+    }
+    await tester.tap(find.text(t('submit')));
+    await tester.pumpAndSettle();
+    await tester.tap(find.text(t('review')));
+    await tester.pumpAndSettle();
+    expect(find.text(t('report')), findsNWidgets(10));
+    await tester.pumpWidget(const SizedBox());
+  });
+
   testWidgets('Quit quiz asks first, then goes back to the quiz setup', (tester) async {
     await start(tester, _twelve);
     await tester.tap(find.text(t('quit_quiz')));
