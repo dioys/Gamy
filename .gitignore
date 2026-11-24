@@ -53,3 +53,6 @@ firestore/node_modules/
 
 # Windows sign-in keys (pasted by you, never shared)
 desktop_client.json
+
+# Sentry crash-report scratch files (made on every run)
+.sentry-native/

@@ -1,6 +1,7 @@
 import 'package:flutter/material.dart';
 import 'package:flutter/services.dart';
 
+import 'algebra.dart';
 import 'brain.dart';
 import 'contact.dart';
 import 'gamy.dart';
@@ -15,8 +16,11 @@ class Q {
   final String topic; // what to look up on Wikipedia for "More about..." in the review ('' = nothing)
   final List<String> choices;
   final Map<String, String> wrong; // what each wrong option actually is
+  final String check; // problem solving: 'num' (a number or fraction), 'expr' (y = 2x + 1), 'pair' ((2, −3))
+  final String part; // problem solving with several topics: the topic, shown as a part heading
+  final List<num>? graph; // a line to draw: x1, y1, x2, y2
   const Q(this.type, this.q, this.answer, this.why, this.hint,
-      {this.choices = const [], this.wrong = const {}, this.topic = ''});
+      {this.choices = const [], this.wrong = const {}, this.topic = '', this.check = 'num', this.part = '', this.graph});
 }
 
 // Quiz types that need Gamy Pro (free: multiple choice, true or false, identification).
@@ -83,6 +87,10 @@ class _QuizState extends State<Quiz> {
   final chosen = <Map>{}; // which of its modules go into the quiz
   int count = 10;
   String type = 'mc';
+  int level = 1; // problem solving: 1 Easy, 2 Medium, 3 Hard (algebra packs)
+  final topicsOff = <String>{}; // algebra topics the student unticked
+  String _topicsKey = '';
+  List<String> _topics = const []; // algebra topics the picked modules teach (worked out once per pick)
   Map? subject;
   String? moduleName;
   List<Q>? qs;
@@ -102,11 +110,7 @@ class _QuizState extends State<Quiz> {
 
   // Typed answers are compared loosely: capitals, hyphens, extra spaces, punctuation and a leading "the" don't
   // matter ("CPU." = "cpu", "random access memory" = "Random-access memory").
-  String _norm(String s) => s
-      .toLowerCase()
-      .replaceAll(RegExp(r'[^\p{L}\p{N}]+', unicode: true), ' ')
-      .trim()
-      .replaceFirst(RegExp(r'^(the|a|an|ang|mga) '), '');
+  String _norm(String s) => normAnswer(s);
 
   // An answer removes that question's "no answer yet" mark.
   void _answered(int i, String v) {
@@ -136,9 +140,11 @@ class _QuizState extends State<Quiz> {
     if (yes == true) _reset();
   }
   // Problem solving checks the number instead (within 1%, units allowed: "12 V").
-  bool _ok(int i) => qs![i].type == 'solve'
-      ? numberOk(answers[i] ?? '', qs![i].answer)
-      : _norm(answers[i] ?? '') == _norm(qs![i].answer);
+  bool _ok(int i) {
+    final q = qs![i], a = answers[i] ?? '';
+    if (q.type != 'solve') return ['id', 'fill'].contains(q.type) ? sameAnswer(a, q.answer) : _norm(a) == _norm(q.answer);
+    return checkAnswer(q.check, a, q.answer);
+  }
   int get _right => [for (var i = 0; i < qs!.length; i++) if (_ok(i)) i].length;
 
   // One question from rules.dart's item, or null if it's broken.
@@ -152,7 +158,10 @@ class _QuizState extends State<Quiz> {
         choices: [for (final c in (m['choices'] as List? ?? [])) '$c'],
         wrong: {
           for (final e in ((m['wrong'] as Map?) ?? {}).entries) (t == 'tf' ? _cap('${e.key}') : '${e.key}'): '${e.value}'
-        });
+        },
+        check: '${m['check'] ?? 'num'}',
+        part: '${m['part'] ?? ''}',
+        graph: (m['graph'] as List?)?.cast<num>());
     return t == 'mc' && !q.choices.contains(q.answer) ? null : q;
   }
 
@@ -186,7 +195,14 @@ class _QuizState extends State<Quiz> {
     if (!mounted) return;
     try {
       final text = modules.map((m) => m['text'] as String).join('\n');
-      final items = type == 'solve' ? solveItems(text, count) : localItems(text, type, count);
+      // Modules with lessons Gamy has packs for: their worked examples, then new problems for the ticked
+      // lessons at the picked level (algebra.dart).
+      final lessons = [for (final k in _topicsOf(modules)) if (!topicsOff.contains(k)) k];
+      final items = type != 'solve'
+          ? localItems(text, type, count)
+          : lessons.isNotEmpty
+              ? packItems(text, lessons, level, count)
+              : solveItems(text, count);
       final list = type == 'match' ? _matching(items) : [for (final m in items) ?_question(m)];
       if (list.isEmpty) throw 'bad_quiz';
       store.useItems(list.length); // counts toward the free weekly 70
@@ -275,10 +291,13 @@ class _QuizState extends State<Quiz> {
     for (var i = 0; i < quiz.length; i++) {
       final q = quiz[i];
       if (_ok(i) || q.topic.isEmpty) continue;
-      final page = await wiki('${q.topic} $subjectName', sentences: 2) ?? await wiki(q.topic, sentences: 2);
+      // Only a page about the term itself (Nov 24: "Nostrils" got "Barbel (zoology)").
+      var page = await wiki('${q.topic} $subjectName', sentences: 2);
+      if (!pageAbout(page?.title, q.topic)) page = await wiki(q.topic, sentences: 2);
       if (!mounted || qs != quiz) return; // the student left this quiz
-      if (page == null) continue;
-      setState(() => more[i] = page);
+      if (page == null || !pageAbout(page.title, q.topic)) continue;
+      final found = page; // a fixed copy: the closure below can't see that page isn't null
+      setState(() => more[i] = found);
     }
   }
 
@@ -380,13 +399,13 @@ class _QuizState extends State<Quiz> {
         ),
       if (!done || review)
         for (var i = 0; i < qs!.length; i++) ...[
-          // Mixed quiz: a heading at the start of each part ("Part II: True or false")
-          if (type == 'mix' && (i == 0 || qs![i].type != qs![i - 1].type))
+          // Mixed quiz and algebra topics: a heading at the start of each part ("Part II: True or false")
+          if ((type == 'mix' || qs![i].part.isNotEmpty) && (i == 0 || _partOf(i) != _partOf(i - 1)))
             Padding(
               padding: const EdgeInsets.fromLTRB(4, 16, 4, 8),
               child: Text(
-                '${t('part')} ${const ['I', 'II', 'III', 'IV', 'V'][qs!.take(i + 1).map((q) => q.type).toSet().length - 1]}: '
-                '${t(qs![i].type)}',
+                '${t('part')} ${const ['I', 'II', 'III', 'IV', 'V', 'VI', 'VII', 'VIII', 'IX', 'X'][qs!.take(i + 1).map((q) => type == 'mix' ? q.type : q.part).toSet().length - 1]}: '
+                '${type == 'mix' ? t(qs![i].type) : qs![i].part}',
                 style: Theme.of(context).textTheme.titleMedium?.copyWith(fontWeight: FontWeight.bold),
               ),
             ),
@@ -394,6 +413,18 @@ class _QuizState extends State<Quiz> {
         ],
       if (!done) FilledButton(onPressed: _submit, child: Text(t('submit'))),
     ]));
+  }
+
+  String _partOf(int i) => type == 'mix' ? qs![i].type : qs![i].part;
+
+  // The algebra topics the picked modules teach; worked out once per set of picked modules (big books are slow).
+  List<String> _topicsOf(List<Map> modules) {
+    final key = modules.map((m) => m['name']).join('|');
+    if (key != _topicsKey) {
+      _topicsKey = key;
+      _topics = modules.isEmpty ? const [] : topicsIn(modules.map((m) => m['text'] as String).join('\n'));
+    }
+    return _topics;
   }
 
   Widget _card(int i, String Function(String) t) {
@@ -411,6 +442,7 @@ class _QuizState extends State<Quiz> {
         child: Column(crossAxisAlignment: CrossAxisAlignment.start, children: [
           // Problems show real exponents: "x^3 − x − 1" as "x³ − x − 1".
           Text('${i + 1}. ${q.type == 'solve' ? powers(q.q) : q.q}', style: const TextStyle(fontWeight: FontWeight.bold)),
+          if (q.graph != null) LineGraph(q.graph!),
           if (missing) Text(t('no_answer_yet'), style: TextStyle(color: Colors.red.shade700)),
           const SizedBox(height: 8),
           if (q.type == 'mc' || q.type == 'tf')
@@ -438,7 +470,11 @@ class _QuizState extends State<Quiz> {
             )
           else
             TextField(
-              keyboardType: q.type == 'solve' ? const TextInputType.numberWithOptions(decimal: true, signed: true) : null,
+              // Numbers get the number keyboard; equations and (x, y) answers need letters and brackets.
+              // Number keyboard for plain numbers; answers with √ or π need letters too ("sqrt", "pi").
+              keyboardType: q.type == 'solve' && q.check == 'num' && !RegExp('[√π]').hasMatch(q.answer)
+                  ? const TextInputType.numberWithOptions(decimal: true, signed: true)
+                  : null,
               onChanged: (v) {
                 answers[i] = v; // no rebuild while typing
                 if (_blank.contains(i) && v.trim().isNotEmpty) setState(() => _blank.remove(i));
@@ -557,6 +593,27 @@ class _QuizState extends State<Quiz> {
             },
           ),
       ]),
+      // Algebra modules: which topics, and how hard (Nov 24: problem solving was too easy).
+      if (type == 'solve' && _topicsOf(picked).isNotEmpty) ...[
+        const SizedBox(height: 16),
+        Text(t('pick_topics')),
+        const SizedBox(height: 8),
+        Wrap(spacing: 8, runSpacing: 8, children: [
+          for (final k in _topicsOf(picked))
+            FilterChip(
+              label: Text(topicName(k)),
+              selected: !topicsOff.contains(k),
+              onSelected: (on) => setState(() => on ? topicsOff.remove(k) : topicsOff.add(k)),
+            ),
+        ]),
+        const SizedBox(height: 16),
+        Text(t('pick_level')),
+        const SizedBox(height: 8),
+        Wrap(spacing: 8, runSpacing: 8, children: [
+          for (final (n, k) in [(1, 'easy'), (2, 'medium'), (3, 'hard')])
+            ChoiceChip(label: Text(t(k)), selected: level == n, onSelected: (_) => setState(() => level = n)),
+        ]),
+      ],
       const SizedBox(height: 16),
       Text('${t('count')}: $count'),
       const SizedBox(height: 8),
@@ -584,7 +641,11 @@ class _QuizState extends State<Quiz> {
           style: Theme.of(context).textTheme.bodySmall,
         ),
       const SizedBox(height: 16),
-      FilledButton(onPressed: picked.isEmpty ? null : () => _start(folder!, picked), child: Text(t('start'))),
+      FilledButton(
+          onPressed: picked.isEmpty || (type == 'solve' && _topicsOf(picked).isNotEmpty && _topicsOf(picked).every(topicsOff.contains))
+              ? null
+              : () => _start(folder!, picked),
+          child: Text(t('start'))),
       if (scores.isNotEmpty) ...[
         const SizedBox(height: 24),
         Text(t('history'), style: const TextStyle(fontWeight: FontWeight.bold)),

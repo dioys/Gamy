@@ -351,4 +351,21 @@ void main() {
       expect(powers('e^(-x) and 2^10'), 'e⁻ˣ and 2¹⁰');
     });
   });
+
+  // Nov 24: "nostril" for "Nostrils" was marked wrong, and "More about" showed "Barbel (zoology)".
+  test('typed answers: singular or plural and one small typo count; short words stay exact', () {
+    expect(sameAnswer('nostril', 'Nostrils'), isTrue);
+    expect(sameAnswer('the mitocondria', 'Mitochondria'), isTrue);
+    expect(sameAnswer('batteries', 'battery'), isTrue);
+    expect(sameAnswer('call', 'cell'), isFalse);
+    expect(sameAnswer('router', 'switch'), isFalse);
+    expect(sameAnswer('', 'cell'), isFalse);
+  });
+
+  test('a Wikipedia page counts only when it is about the term', () {
+    expect(pageAbout('Nostril', 'Nostrils'), isTrue);
+    expect(pageAbout('Barbel (zoology)', 'Nostrils'), isFalse);
+    expect(pageAbout('Random-access memory', 'random access memory'), isTrue);
+    expect(pageAbout(null, 'cell'), isFalse);
+  });
 }

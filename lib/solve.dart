@@ -1,5 +1,6 @@
 import 'dart:math';
 
+import 'examples.dart';
 import 'store.dart';
 
 // ----- Problem solving: number problems from the module's formulas (no AI) -----
@@ -31,8 +32,9 @@ List<String>? _tokens(String s, {bool fn = false}) {
       .replaceAll(RegExp(r'[−–]'), '-')
       .replaceAll('²', '^2')
       .replaceAll('³', '^3')
-      .replaceAll('√', ' sqrt ');
-  final piece = RegExp(r'\s*(\d+(?:\.\d+)?|sqrt|sin|cos|tan|ln|log|exp|[A-Za-z](?:_?\d+|_[A-Za-z]{1,3})?|[-+*/^()])');
+      .replaceAll('√', ' sqrt ')
+      .replaceAll('π', ' pi ');
+  final piece = RegExp(r'\s*(\d+(?:\.\d+)?|sqrt|sin|cos|tan|ln|log|exp|pi|[A-Za-z](?:_?\d+|_[A-Za-z]{1,3})?|[-+*/^()])');
   final out = <String>[];
   var i = 0;
   while (i < s.length) {
@@ -107,6 +109,7 @@ class _Parser {
       return (v) => f(a(v));
     }
     if (fn && s == 'e') return (_) => e;
+    if (s == 'pi') return (_) => pi; // π (Nov 24: radians like "5π/6")
     if (!RegExp(r'^[A-Za-z]').hasMatch(s)) throw 'symbol';
     if (!names.contains(s)) names.add(s);
     return (v) => v[s]!;
@@ -125,7 +128,9 @@ final _fns = <String, double Function(num)>{
 
 // A formula on one line: a short name, "=", then only math. The math stops at a comma, a full stop
 // or the first word after a space ("V = I x R, where V is voltage" -> "I x R"; "E = mc² is famous" -> "mc²").
-final _candidate = RegExp(r'(?<![\w)])([A-Za-z](?:_?\d+|_[A-Za-z]{1,3})?)\s*=\s*([^=,;:\n]+)');
+// (Not the middle of a longer equation: "V1/T1 = b V2/T2" gives no "T1 = b V2/T2", Nov 24.)
+final _candidate =
+    RegExp(r'(?<![\w)\]/*+×·÷^.\-−–])(?<![/*+×·÷^=\-−–]\s)([A-Za-z](?:_?\d+|_[A-Za-z]{1,3})?)\s*=\s*([^=,;:\n]+)');
 final _stop = RegExp(r'\s+[a-z]{2,}\b|\s+[A-Za-z]{3,}\b|\.(?!\d)');
 
 // Proof books write "L1 = p1L" for joining maps, not numbers. A "formula" with arrows, ⊗, ∈... or words like
@@ -150,6 +155,8 @@ List<Formula> formulas(String text) {
   for (final m in _candidate.allMatches(text)) {
     if (_inProof(text, m)) continue;
     final result = m[1]!, math = m[2]!.split(_stop).first.trim();
+    // Part of a chain ("V1/T1 = b V2/T2 = b"): its pieces aren't a formula on their own.
+    if (math == m[2]!.trim() && text.substring(m.end).trimLeft().startsWith('=')) continue;
     final pieces = _tokens(math);
     if (pieces == null || pieces.isEmpty) continue;
     // "y = f(x)" is function notation, not "f times x": a single letter right before "(" means a function.
@@ -219,6 +226,8 @@ const _methods = {
 
 // A method counts only when the module really teaches it: at least one mention per 50,000 characters.
 // Nov 23: a 700-page algebra book that names "Jacobi" twice in passing got Jacobi problems.
+bool teaches(String text, String pattern) => _teaches(text, pattern);
+
 bool _teaches(String text, String pattern) {
   final n = RegExp(pattern, caseSensitive: false).allMatches(text).length;
   return n > 0 && n * 50000 >= text.length;
@@ -299,6 +308,7 @@ List<Map> methodItems(String text) {
             'why': why(k - 1),
             'hint': _fill(t('m_hint'), parts),
             'topic': _topics[e.key],
+            'key': '${e.key}|${f.text}|$neg',
           });
         }
         out.add({
@@ -308,6 +318,7 @@ List<Map> methodItems(String text) {
           'why': why(rows.length - 1),
           'hint': _fill(t('m_hint'), parts),
           'topic': _topics[e.key],
+          'key': '${e.key}|${f.text}|$neg',
         });
       }
     }
@@ -512,7 +523,7 @@ List<Map> systemItems(String text, {int practice = 2}) {
             _sysTable(s, rows, mark: mark),
             '${t('sys_answer')} ${[for (var i = 0; i < n; i++) '${s.vars[i]} = ${rows.last.x[i].toStringAsFixed(4)}'].join(', ')}',
           ].join('\n');
-      final item = {'type': 'solve', 'hint': _fill(t('sys_hint'), parts), 'topic': _sysTopics[m]};
+      final item = {'type': 'solve', 'hint': _fill(t('sys_hint'), parts), 'topic': _sysTopics[m], 'key': '$m|${parts['eqs']}'};
       for (final k in [1, 2]) {
         final v = _rng.nextInt(n);
         out.add({
@@ -695,7 +706,7 @@ List<Map> successiveItems(String text) {
         ].join('\n');
       }
 
-      final item = {'type': 'solve', 'hint': _fill(t('ss_hint'), parts), 'topic': 'Fixed-point iteration'};
+      final item = {'type': 'solve', 'hint': _fill(t('ss_hint'), parts), 'topic': 'Fixed-point iteration', 'key': 'ss|${f.text}|$a'};
       for (final k in [1, 2, 3]) {
         out.add({...item, 'q': _fill(t('ss_step'), {...parts, 'k': '$k'}), 'answer': d4(rows[k - 1].next), 'why': why(k - 1)});
       }
@@ -705,67 +716,218 @@ List<Map> successiveItems(String text) {
   return out;
 }
 
+// Nov 24: one question per problem, never repeats. A formula, a function's root or a system of equations is
+// asked about once per quiz (a biology module got "r = b − d" four times with new numbers). When a module has
+// fewer different problems than asked for, the quiz is shorter and says so ("Only N good questions...").
+List<Map> _onePerProblem(List<Map> items) {
+  final seen = <Object?>{};
+  return [for (final m in items..shuffle(_rng)) if (seen.add(m['key'] ?? m['q'])) m];
+}
+
 List<Map> solveItems(String text, int count) {
   // A numerical-methods module gets problems on its own methods; other modules get formula problems.
-  final methods = [...methodItems(text), ...systemItems(text), ...successiveItems(text)]..shuffle(_rng);
+  final methods = _onePerProblem([...methodItems(text), ...systemItems(text), ...successiveItems(text)]);
   if (methods.isNotEmpty) return methods.take(count).toList();
   if (proofBook(text)) throw 'proof_book';
-  final all = [...formulas(text), ...functions(text)];
-  if (all.isEmpty) throw 'no_formulas';
-  // Nov 23: problems come from the whole module, evenly spread (like the other quiz types), not from its first
-  // pages: 50 problems from a 700-page book all came from the first 10%.
-  final step = all.length / min(count, all.length), start = _rng.nextDouble() * step;
-  final fs = [for (var i = 0; i < min(count, all.length); i++) all[(start + i * step).floor().clamp(0, all.length - 1)]]
+  // First the module's own worked examples, with new numbers (examples.dart); formulas only to fill up, and not
+  // the ones the examples already use.
+  final out = exampleItems(text).take(count).toList(), inExamples = exampleFormulas(text);
+  final all = [
+    for (final f in formulas(text))
+      if (!inExamples.contains(f.text.substring(f.text.indexOf('=') + 1).replaceAll(' ', ''))) f,
+    ...functions(text),
+  ];
+  if (out.isEmpty && all.isEmpty) throw 'no_formulas';
+  if (out.length >= count || all.isEmpty) return out;
+  // Problems come from the whole module, evenly spread (Nov 23), each formula once.
+  final n = min(count - out.length, all.length), step = all.length / n, start = _rng.nextDouble() * step;
+  final fs = {for (var i = 0; i < n; i++) all[(start + i * step).floor().clamp(0, all.length - 1)]}.toList()
     ..shuffle(_rng);
-  final t = store.t, out = <Map>[];
-  for (var n = 0; out.length < count && n < count * 20; n++) {
-    final f = fs[n % fs.length];
-    if (f.fn) {
-      // "Using f(x) = x^2 + 3x, find f(2)." with x from 0.5 to 5
-      final x = (_rng.nextInt(10) + 1) / 2, y = f.calc({f.inputs.single: x});
-      if (!y.isFinite || y.abs() > 1e6) continue;
-      final parts = {'f': f.text, 'x': '${f.result}(${fmt(x)})', 'v': '${f.inputs.single} = ${fmt(x)}', 'a': fmt(y)};
-      // Solution: f(1.5) = e^(1.5) − 4√(1.5) = -0.42
-      final math = f.text.substring(f.text.indexOf('=') + 1).trim();
-      out.add({
-        'type': 'solve',
-        'q': _fill(t('s_fn'), parts),
-        'answer': fmt(y),
-        'why': '${_fill(t('s_fn_why'), parts)}\n${parts['x']} = ${_put(math, {f.inputs.single: x})} = ${fmt(y)}',
-        'hint': _fill(t('s_hint'), parts),
-      });
-      continue;
+  for (final f in fs) {
+    for (var tries = 0; tries < 10; tries++) {
+      final m = _formulaItem(f);
+      if (m != null) {
+        out.add(m);
+        break;
+      }
     }
-    final values = {for (final x in f.inputs) x: (_rng.nextInt(12) + 1).toDouble()}; // 1 to 12
-    final y = f.calc(values);
-    if (!y.isFinite || y == 0 || y.abs() > 1e6) continue;
-    // Backwards only when the result is shown exactly, so the student can get the exact input back.
-    final back = _rng.nextBool() && y == y.roundToDouble();
-    final ask = back ? f.inputs[_rng.nextInt(f.inputs.length)] : f.result;
-    final known = {...values, f.result: y}..remove(ask);
-    final given = [for (final e in known.entries) '${e.key} = ${fmt(e.value)}'].join(', ');
-    final answer = fmt(back ? values[ask]! : y);
-    final parts = {'f': f.text, 'x': ask, 'given': given, 'a': answer};
-    // Solution: the numbers put into the formula, then the answer (and a check when solving backwards).
-    final math = f.text.substring(f.text.indexOf('=') + 1).trim();
-    final work = back
-        ? '${fmt(y)} = ${_put(math, known..remove(f.result))}\n$ask = $answer\n'
-            '${t('s_check')}: ${f.result} = ${_put(math, values)} = ${fmt(y)}'
-        : '$ask = ${_put(math, values)} = $answer';
-    out.add({
-      'type': 'solve',
-      'q': _fill(t('s_find'), parts),
-      'answer': answer,
-      'why': '${_fill(t(back ? 's_why_inv' : 's_why_fwd'), parts)}\n$work',
-      'hint': _fill(t('s_hint'), parts),
-    });
   }
+  if (out.isEmpty) throw 'no_formulas';
   return out;
+}
+
+// One problem from a formula or function, with new numbers; null if these numbers don't work (try again).
+Map? _formulaItem(Formula f) {
+  final t = store.t;
+  if (f.fn) {
+    // "Using f(x) = x^2 + 3x, find f(2)." with x from 0.5 to 5
+    final x = (_rng.nextInt(10) + 1) / 2, y = f.calc({f.inputs.single: x});
+    if (!y.isFinite || y.abs() > 1e6) return null;
+    final parts = {'f': f.text, 'x': '${f.result}(${fmt(x)})', 'v': '${f.inputs.single} = ${fmt(x)}', 'a': fmt(y)};
+    // Solution: f(1.5) = e^(1.5) − 4√(1.5) = -0.42
+    final math = f.text.substring(f.text.indexOf('=') + 1).trim();
+    return {
+      'type': 'solve',
+      'q': _fill(t('s_fn'), parts),
+      'answer': fmt(y),
+      'why': '${_fill(t('s_fn_why'), parts)}\n${parts['x']} = ${_put(math, {f.inputs.single: x})} = ${fmt(y)}',
+      'hint': _fill(t('s_hint'), parts),
+    };
+  }
+  final values = {for (final x in f.inputs) x: (_rng.nextInt(12) + 1).toDouble()}; // 1 to 12
+  final y = f.calc(values);
+  if (!y.isFinite || y == 0 || y.abs() > 1e6) return null;
+  // Backwards only when the result is shown exactly, so the student can get the exact input back.
+  final back = _rng.nextBool() && y == y.roundToDouble();
+  final ask = back ? f.inputs[_rng.nextInt(f.inputs.length)] : f.result;
+  final known = {...values, f.result: y}..remove(ask);
+  final given = [for (final e in known.entries) '${e.key} = ${fmt(e.value)}'].join(', ');
+  final answer = fmt(back ? values[ask]! : y);
+  final parts = {'f': f.text, 'x': ask, 'given': given, 'a': answer};
+  // Solution: the numbers put into the formula, then the answer (and a check when solving backwards).
+  final math = f.text.substring(f.text.indexOf('=') + 1).trim();
+  final work = back
+      ? '${fmt(y)} = ${_put(math, known..remove(f.result))}\n$ask = $answer\n'
+          '${t('s_check')}: ${f.result} = ${_put(math, values)} = ${fmt(y)}'
+      : '$ask = ${_put(math, values)} = $answer';
+  return {
+    'type': 'solve',
+    'q': _fill(t('s_find'), parts),
+    'answer': answer,
+    'why': '${_fill(t(back ? 's_why_inv' : 's_why_fwd'), parts)}\n$work',
+    'hint': _fill(t('s_hint'), parts),
+  };
 }
 
 // A typed number counts if it's within 1% (rounding) of the answer. "12 V" and "12.0" both match 12.
 bool numberOk(String typed, String answer) {
+  // Nov 24: fractions count too ("3/4", "-7/2"); otherwise the first number, so units are fine ("12 V").
   final m = RegExp(r'-?\d+(?:\.\d+)?').firstMatch(typed.replaceAll(',', ''));
-  final a = m == null ? null : double.parse(m[0]!), b = double.parse(answer);
+  final a = numberOf(typed) ?? (m == null ? null : double.parse(m[0]!)), b = numberOf(answer)!;
   return a != null && (a - b).abs() <= max(b.abs() * .01, .005);
 }
+
+// A typed number or plain math without letters ("3/4", "−2.5", "(1+2)/4"), or null.
+double? numberOf(String s) {
+  final e = readExpression(s);
+  if (e == null || e.names.isNotEmpty) return null;
+  final v = e.calc(const {});
+  return v.isFinite ? v : null;
+}
+
+// Typed math as a calculation and its letters, or null if it isn't math: "(x+2)(x+3)", "2/3x - 1", "6√2".
+({Calc calc, List<String> names})? readExpression(String s) {
+  final t = _tokens(s.replaceAll(',', '').trim(), fn: true);
+  if (t == null || t.isEmpty) return null;
+  try {
+    final p = _Parser(t, fn: true), c = p.sum();
+    return p.i == t.length ? (calc: c, names: p.names) : null;
+  } catch (_) {
+    return null;
+  }
+}
+
+// The same expression? Both are tried with several values for their letters ("y =" in front is ignored),
+// so any correct form counts: (x+3)(x+2) = (x+2)(x+3) = x^2 + 5x + 6.
+bool exprOk(String typed, String answer) {
+  // "y =", "f(x) =", "f⁻¹(x) =" and "f^-1(x) =" in front are left out.
+  String side(String s) =>
+      s.replaceFirst(RegExp(r'^\s*[A-Za-z](?:\s*(?:⁻¹|\^\s*\(?[-−]1\)?))?(?:\s*\(\s*[a-z]\s*\))?\s*=\s*'), '');
+  final a = readExpression(side(typed)), b = readExpression(side(answer));
+  if (a == null || b == null || a.names.any((n) => !b.names.contains(n))) return false;
+  try {
+    for (final x in const [-2.3, 0.7, 1.9, 3.1]) {
+      final v = {for (var i = 0; i < b.names.length; i++) b.names[i]: x + i * 1.37};
+      final p = a.calc(v), q = b.calc(v);
+      if (!p.isFinite || !q.isFinite || (p - q).abs() > max(q.abs() * 1e-6, 1e-6)) return false;
+    }
+    return true;
+  } catch (_) {
+    return false;
+  }
+}
+
+// The numbers in an answer, in order: "(2, -3)", "x = 2, y = -3", "2,-3", "1/2" (fractions allowed).
+List<double> _numbersIn(String s) => [
+      for (final m in RegExp(r'-?\d+(?:\.\d+)?(?:\s*/\s*\d+)?')
+          .allMatches(s.replaceAll(RegExp(r'[−–]'), '-').replaceAll(RegExp(r'[a-z]\s*='), '')))
+        numberOf(m[0]!)!
+    ];
+bool _close(double a, double b) => (a - b).abs() <= max(b.abs() * .01, .005);
+
+// The same numbers in the same order: "(2, -3)", "x = 2, y = -3", "2,-3" (fractions allowed).
+bool pairOk(String typed, String answer) {
+  final a = _numbersIn(typed), b = _numbersIn(answer);
+  if (a.length != b.length || b.isEmpty) return false;
+  for (var i = 0; i < b.length; i++) {
+    if (!_close(a[i], b[i])) return false;
+  }
+  return true;
+}
+
+// The same numbers in any order: both roots of a quadratic, every angle of a trig equation ("x = 3 or x = -2").
+bool setOk(String typed, String answer) {
+  final a = _numbersIn(typed)..sort(), b = _numbersIn(answer)..sort();
+  if (a.length != b.length || b.isEmpty) return false;
+  for (var i = 0; i < b.length; i++) {
+    if (!_close(a[i], b[i])) return false;
+  }
+  return true;
+}
+
+// The same inequality: "x <= 3/2" = "x ≤ 1.5", "3 > x" = "x < 3", "x > 5 or x < 2" = "x < 2 or x > 5".
+const _flipped = {'<': '>', '>': '<', '≤': '≥', '≥': '≤'};
+bool ineqOk(String typed, String answer) {
+  List<String>? read(String s) {
+    s = s.toLowerCase().replaceAll(RegExp(r'[−–]'), '-').replaceAll('<=', '≤').replaceAll('>=', '≥');
+    s = s.replaceAll(RegExp(r'\s+'), '').replaceAll(',', 'or');
+    final t = [for (final m in RegExp(r'-?\d+(?:\.\d+)?(?:/\d+)?|[<>≤≥]|or|x').allMatches(s)) m[0]!];
+    if (t.join() != s || t.isEmpty) return null;
+    return t.length == 3 && t[2] == 'x' && t[0] != 'x' ? ['x', _flipped[t[1]] ?? t[1], t[0]] : t;
+  }
+
+  bool same(List<String> a, List<String> b) {
+    if (a.length != b.length) return false;
+    for (var i = 0; i < a.length; i++) {
+      final x = numberOf(a[i]), y = numberOf(b[i]);
+      if (x != null && y != null ? !_close(x, y) : a[i] != b[i]) return false;
+    }
+    return true;
+  }
+
+  final a = read(typed), b = read(answer);
+  if (a == null || b == null) return false;
+  final or = b.indexOf('or');
+  return same(a, b) || or > 0 && same(a, [...b.sublist(or + 1), 'or', ...b.sublist(0, or)]);
+}
+
+// A simplified radical: the right value, no perfect square left under a root, no root at the bottom
+// ("6√2" for √72, not "√72"; "2√6/3", not "4/√6").
+bool radicalOk(String typed, String answer) {
+  if (!numberOk(typed, answer)) return false;
+  final roots = [for (final m in RegExp(r'(?:√|sqrt)\s*\(?\s*(\d+)').allMatches(typed)) int.parse(m[1]!)];
+  if (answer.contains('√') && roots.isEmpty) return false;
+  if (roots.any((n) => [for (var k = 2; k * k <= n; k++) k].any((k) => n % (k * k) == 0))) return false;
+  return !RegExp(r'/\s*\(?\s*\d*\s*(?:√|sqrt)').hasMatch(typed);
+}
+
+// Is a typed answer right? [check] says how the problem wants it checked (packs in algebra.dart):
+// num: a number within 1%; expr: the same expression; pair: numbers in order; set: numbers in any order;
+// ineq: an inequality; factor: the same expression written as a product; expanded: with no brackets;
+// simple: with no powers left (a simplified fraction); radical: a simplified root.
+bool checkAnswer(String check, String typed, String answer) => switch (check) {
+      'expr' => exprOk(typed, answer),
+      'pair' => pairOk(typed, answer),
+      'set' => setOk(typed, answer),
+      'ineq' => ineqOk(typed, answer),
+      'factor' => exprOk(typed, answer) &&
+          RegExp(r'\)\s*[*·×]?\s*[(^²]|^\s*[-−]?(?:\d+[a-z]?|[a-z])\s*\(').hasMatch(typed.trim()),
+      'expanded' => exprOk(typed, answer) && !typed.contains('('),
+      'simple' => exprOk(typed, answer) && !RegExp(r'[\^²³]').hasMatch(typed),
+      'radical' => radicalOk(typed, answer),
+      _ => numberOk(typed, answer),
+    };
+
+// A module about numerical methods: its own problems (false position, Jacobi...) come before the algebra packs.
+bool teachesNumerical(String text) =>
+    _teaches(text, 'false position|regula falsi|bisection|jacobi|seidel|$_ssPattern');

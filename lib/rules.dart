@@ -85,6 +85,55 @@ String cleanReply(String text) => mathText(cleanPrivate(text))
     .replaceAll(RegExp(r'[ \t]{2,}'), ' ')
     .trim();
 
+// ----- Checking typed answers (quiz.dart) -----
+// Capitals, hyphens, extra spaces, punctuation and a leading "the" don't matter ("CPU." = "cpu").
+String normAnswer(String s) => s
+    .toLowerCase()
+    .replaceAll(RegExp(r'[^\p{L}\p{N}]+', unicode: true), ' ')
+    .trim()
+    .replaceFirst(RegExp(r'^(the|a|an|ang|mga) '), '');
+
+// Nov 24: "nostril" for "Nostrils" was marked wrong. A typed answer also counts when it's the same word in
+// singular or plural, or has one small typo in a longer word ("mitocondria"). Short words must be exact
+// ("cell" is not "call").
+bool sameAnswer(String typed, String answer) {
+  final a = normAnswer(typed), b = normAnswer(answer);
+  if (a.isEmpty) return false;
+  if (a == b) return true;
+  String one(String w) => w.endsWith('ies') && w.length > 4
+      ? '${w.substring(0, w.length - 3)}y'
+      : w.endsWith('es') && RegExp(r'(s|x|z|ch|sh)es$').hasMatch(w)
+          ? w.substring(0, w.length - 2)
+          : w.endsWith('s') && !w.endsWith('ss') && w.length > 3
+              ? w.substring(0, w.length - 1)
+              : w;
+  String singular(String s) => s.split(' ').map(one).join(' ');
+  if (singular(a) == singular(b)) return true;
+  return b.length >= 6 && _edits(singular(a), singular(b)) <= 1;
+}
+
+// How many letters must change, be added or removed to turn [a] into [b] (stops counting at 2).
+int _edits(String a, String b) {
+  if ((a.length - b.length).abs() > 1) return 2;
+  var prev = List<int>.generate(b.length + 1, (i) => i);
+  for (var i = 1; i <= a.length; i++) {
+    final row = [i, for (var j = 1; j <= b.length; j++) 0];
+    for (var j = 1; j <= b.length; j++) {
+      row[j] = [prev[j] + 1, row[j - 1] + 1, prev[j - 1] + (a[i - 1] == b[j - 1] ? 0 : 1)].reduce(min);
+    }
+    prev = row;
+  }
+  return prev[b.length];
+}
+
+// Whether a Wikipedia page title is about [term]: a word of the title starts like a word of the term
+// ("Nostril" for "Nostrils"; not "Barbel (zoology)").
+bool pageAbout(String? title, String term) {
+  if (title == null) return false;
+  final t = normAnswer(title).split(' '), w = [for (final x in normAnswer(term).split(' ')) if (x.length >= 3) x];
+  return w.any((x) => t.any((y) => y.length >= 3 && (y.startsWith(x.substring(0, min(5, x.length))) || x.startsWith(y))));
+}
+
 // ----- Math that reads well (Nov 23: the brain writes LaTeX like "$ p^a q^b $") -----
 const _sup = {
   '0': '⁰', '1': '¹', '2': '²', '3': '³', '4': '⁴', '5': '⁵', '6': '⁶', '7': '⁷', '8': '⁸', '9': '⁹', '+': '⁺',

@@ -122,8 +122,8 @@ void main() {
       final f = functions(text).single;
       expect(f.text, 'f(x) = e^x − 4√x');
       expect(f.calc({'x': 1}), closeTo(exp(1) - 4, 1e-9));
-      final items = solveItems(text, 5);
-      expect(items, hasLength(5));
+      final items = [for (var i = 0; i < 5; i++) ...solveItems(text, 5)];
+      expect(solveItems(text, 5), hasLength(1), reason: 'Nov 24: one function = one problem, no repeats');
       for (final m in items) {
         final x = double.parse(RegExp(r'find f\(([\d.]+)\)\.$').firstMatch(m['q'])![1]!);
         expect(numberOk(m['answer'], fmt(exp(x) - 4 * sqrt(x))), isTrue, reason: m['q']);
@@ -181,8 +181,13 @@ void main() {
       store.lang = 'en';
       const module = 'The False Position (Regula Falsi) Method. A shortcoming of the bisection method is speed.\n'
           'Example 1.) Find a root of an equation f(x) = x 3 − x − 1 using False Position method.';
-      final items = solveItems(module, 100);
-      expect(items, hasLength(8), reason: '2 methods x (steps 1, 2, 3 + the root)');
+      // Every question Gamy can make about it: 2 methods x (steps 1, 2, 3 + the root)...
+      final items = methodItems(module);
+      expect(items, hasLength(8));
+      // ...but a quiz asks about each problem once (Nov 24: no repeats): one per method.
+      final quiz = solveItems(module, 100);
+      expect(quiz, hasLength(2));
+      expect(quiz.map((m) => (m['q'] as String).contains('false position')).toSet(), {true, false});
       for (final m in items) {
         expect(m['q'], contains('f(x) = x^3 − x − 1'));
         expect(m['q'], anyOf(contains('false position method'), contains('bisection method')));
@@ -197,7 +202,7 @@ void main() {
       store.lang = 'en';
       const module = 'The False Position (Regula Falsi) Method.\n'
           'Example 1.) Find a root of an equation f(x) = x 3 − x − 1 using False Position method.';
-      final step1 = solveItems(module, 100)
+      final step1 = methodItems(module)
           .firstWhere((m) => (m['q'] as String).contains('false position') && (m['q'] as String).contains('step 1'));
       final table = step1['why'] as String;
       expect(table, contains('f(x-)'), reason: 'the step table, like the module');
@@ -262,9 +267,19 @@ void main() {
   });
 
   group('making problems', () {
+    // Nov 24: a biology module got "r = b − d" four times with new numbers. One formula = one question.
+    test('a module with one formula gets one problem, not the same formula again and again', () {
+      const biology = 'Population growth rate: r = b − d, where b is the birth rate and d the death rate.';
+      expect(solveItems(biology, 10), hasLength(1));
+    });
+
     test('every answer is right, and there are forward and backward problems', () {
-      final items = solveItems(_module, 200);
-      expect(items, hasLength(200));
+      // Nov 24: each formula once per quiz, so 200 asked gives one problem per formula (no repeats)...
+      final once = solveItems(_module, 200);
+      expect(once.length, formulas(_module).length + functions(_module).length);
+      expect(once.map((m) => RegExp(r'^Using (.+), find').firstMatch(m['q'])![1]).toSet(), hasLength(once.length));
+      // ...and many quizzes in a row check the answers and both directions (new numbers every time).
+      final items = [for (var i = 0; i < 40; i++) ...solveItems(_module, 200)];
       final kinds = <String>{};
       for (final m in items) {
         expect(m['type'], 'solve');
@@ -350,8 +365,11 @@ void main() {
     });
 
     test('problems ask about both methods, each with its full solution and the answer inside it', () {
-      final items = solveItems(_module3, 500);
+      final items = [...systemItems(_module3)];
       expect(items.map((m) => m['topic']).toSet(), {'Jacobi method', 'Gauss–Seidel method'});
+      // A quiz asks about each system once per method (Nov 24: no repeats).
+      final quiz = solveItems(_module3, 500);
+      expect(quiz.map((m) => m['key']).toSet(), hasLength(quiz.length));
       for (final m in items) {
         expect(m['type'], 'solve');
         expect(m['q'], anyOf(contains('Jacobi method'), contains('Gauss-Seidel method')));
